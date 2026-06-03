@@ -16,7 +16,7 @@ export class MapController {
   constructor(private readonly layerService: LayerService) {}
 
   @ApiOperation({ summary: '获取场景图层', description: '获取场景图层数据' })
-  @ApiParam({ name: 'mapId', description: '地图ID' })
+  @ApiParam({ name: 'mapid', description: '地图ID' })
   @ApiResponse({ status: 200, description: '成功获取场景图层数据' })
   @Get('list')
   getLayer() {

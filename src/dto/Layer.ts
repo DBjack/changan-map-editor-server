@@ -1,4 +1,4 @@
 export class UpdateLayerDto {
-  layerId: string;
-  layerList: string[];
+  id: string;
+  layerList: [];
 }
