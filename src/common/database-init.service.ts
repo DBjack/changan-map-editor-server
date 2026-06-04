@@ -22,7 +22,7 @@ export class DatabaseInitService implements OnModuleInit {
       'DB_PASSWORD',
       'Root@123456',
     );
-    const database = this.configService.get<string>('DB_DATABASE', 'map');
+    const database = this.configService.get<string>('DB_DATABASE', 'layer');
 
     try {
       // 先连接到 MySQL 服务器（不指定数据库）
