@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { MapModule } from './map/map.module';
+import { LayerModule } from './layer/layer.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DatabaseInitService } from './common/database-init.service';
@@ -14,6 +14,7 @@ import { DatabaseInitService } from './common/database-init.service';
     }),
     // 配置数据库连接
     TypeOrmModule.forRootAsync({
+      //使用工厂函数配置数据库连接参数，根据环境变量动态配置
       useFactory: (configService: ConfigService) => ({
         type: 'mysql',
         host: configService.get('DB_HOST', 'localhost'),
@@ -27,7 +28,7 @@ import { DatabaseInitService } from './common/database-init.service';
       }),
       inject: [ConfigService],
     }),
-    MapModule,
+    LayerModule,
   ],
   controllers: [AppController],
   providers: [AppService, DatabaseInitService],

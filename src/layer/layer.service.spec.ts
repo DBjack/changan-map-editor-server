@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { LayerService } from './map.service';
+import { LayerService } from './layer.service';
 
 describe('LayerService', () => {
   let service: LayerService;

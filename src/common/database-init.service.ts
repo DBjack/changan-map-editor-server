@@ -8,15 +8,20 @@ export class DatabaseInitService implements OnModuleInit {
 
   constructor(private readonly configService: ConfigService) {}
 
+  // 在模块初始化时调用，确保数据库已创建
   async onModuleInit() {
     await this.initializeDatabase();
   }
 
+  // 初始化数据库，创建必要的数据库和表(typeorm无法自动创建数据库和表，需要在模块初始化前创建数据库)
   private async initializeDatabase() {
     const host = this.configService.get<string>('DB_HOST', 'localhost');
     const port = this.configService.get<number>('DB_PORT', 3306);
     const username = this.configService.get<string>('DB_USERNAME', 'root');
-    const password = this.configService.get<string>('DB_PASSWORD', 'Root@123456');
+    const password = this.configService.get<string>(
+      'DB_PASSWORD',
+      'Root@123456',
+    );
     const database = this.configService.get<string>('DB_DATABASE', 'map');
 
     try {

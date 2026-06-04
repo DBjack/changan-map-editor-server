@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MapController } from './map.controller';
+import { LayerController } from './layer.controller';
 
-describe('MapController', () => {
-  let controller: MapController;
+describe('LayerController', () => {
+  let controller: LayerController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [MapController],
+      controllers: [LayerController],
     }).compile();
 
-    controller = module.get<MapController>(MapController);
+    controller = module.get<LayerController>(LayerController);
   });
 
   it('should be defined', () => {

@@ -17,7 +17,7 @@ async function bootstrap() {
       .setTitle('长安地图编辑器 API')
       .setDescription('机器人地图编辑后端服务 API 文档')
       .setVersion('1.0.0')
-      .addTag('地图', '地图相关接口')
+      .addTag('图层', '图层管理接口')
       .addTag('默认', '默认接口')
       .build();
 
