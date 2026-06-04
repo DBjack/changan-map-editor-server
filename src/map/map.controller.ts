@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { LayerService } from './map.service';
 import {
   ApiBody,
@@ -18,18 +26,18 @@ export class MapController {
   @ApiOperation({ summary: '获取场景图层', description: '获取场景图层数据' })
   @ApiParam({ name: 'mapid', description: '地图ID' })
   @ApiResponse({ status: 200, description: '成功获取场景图层数据' })
-  @Get('list')
-  getLayer() {
-    return this.layerService.getLayer();
+  @Get('list/:mapid')
+  getLayer(@Param('mapid') mapid: number) {
+    return this.layerService.getLayer(mapid);
   }
 
-  @ApiOperation({ summary: '添加场景图层', description: '添加场景图层数据' })
-  @ApiParam({ name: 'mapId', description: '地图ID' })
-  @ApiResponse({ status: 200, description: '成功添加场景图层数据' })
-  @Post('add')
-  addLayer() {
-    return this.layerService.addLayer();
-  }
+  // @ApiOperation({ summary: '添加场景图层', description: '添加场景图层数据' })
+  // @ApiParam({ name: 'mapId', description: '地图ID' })
+  // @ApiResponse({ status: 200, description: '成功添加场景图层数据' })
+  // @Post('add')
+  // addLayer() {
+  //   return this.layerService.addLayer();
+  // }
 
   @ApiOperation({ summary: '更新场景图层', description: '更新场景图层数据' })
   @ApiBody({ type: UpdateLayerDto })
@@ -42,8 +50,8 @@ export class MapController {
   @ApiOperation({ summary: '删除场景图层', description: '删除场景图层数据' })
   @ApiParam({ name: 'mapId', description: '地图ID' })
   @ApiResponse({ status: 200, description: '成功删除场景图层数据' })
-  @Post('delete')
-  deleteLayer() {
-    return this.layerService.deleteLayer();
+  @Get('delete/:mapid')
+  deleteLayer(@Param('mapid') mapid: number) {
+    return this.layerService.deleteLayer(mapid);
   }
 }

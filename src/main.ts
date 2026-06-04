@@ -10,6 +10,9 @@ async function bootstrap() {
     // 注册全局响应拦截器
     app.useGlobalInterceptors(new TransformInterceptor());
 
+    // 设置全局 API 前缀
+    app.setGlobalPrefix(process.env.API_PREFIX || 'v1');
+
     const config = new DocumentBuilder()
       .setTitle('长安地图编辑器 API')
       .setDescription('机器人地图编辑后端服务 API 文档')

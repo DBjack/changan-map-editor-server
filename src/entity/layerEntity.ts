@@ -1,10 +1,10 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
-@Entity()
-export class Layer {
+@Entity('layer')
+export class LayerEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'array', array: true, default: '[]' })
-  layerList: string[];
+  @Column({ type: 'json' })
+  layer_info: Record<string, any>;
 }

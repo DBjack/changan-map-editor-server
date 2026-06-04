@@ -1,29 +1,40 @@
 import { Injectable } from '@nestjs/common';
 import { UpdateLayerDto } from 'src/dto/Layer';
-import { AppResponse } from 'src/common/response';
 import { Repository } from 'typeorm';
-import { Layer } from 'src/entities/Layer';
+import { InjectRepository } from '@nestjs/typeorm';
+import { LayerEntity } from 'src/entity/layerEntity';
 
 @Injectable()
 export class LayerService {
-  constructor(private readonly layerRepository: Repository<Layer>) {}
+  constructor(
+    @InjectRepository(LayerEntity)
+    private readonly layerRepository: Repository<LayerEntity>,
+  ) {}
 
-  getLayer() {
-    return 'layer';
+  // 获取场景图层接口
+  getLayer(mapid: number) {
+    const result = this.layerRepository.findBy({ id: mapid });
+    return result;
   }
 
+  // 更新图层接口
   async updateLayer(layer: UpdateLayerDto) {
-    const result = await this.layerRepository.update(layer.id, {
-      layerList: layer.layerList,
+    let result = {};
+    result = await this.layerRepository.save({
+      id: Number(layer.id),
+      layer_info: layer.layerInfo,
     });
-    return AppResponse.success(result);
+
+    return result;
   }
 
-  addLayer() {
-    return 'add layer';
-  }
+  // addLayer() {
+  //   return 'add layer';
+  // }
 
-  deleteLayer() {
-    return 'delete layer';
+  // 删除图层接口
+  async deleteLayer(mapid: number) {
+    const result = await this.layerRepository.delete(mapid);
+    return result;
   }
 }

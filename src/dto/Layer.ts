@@ -1,4 +1,4 @@
 export class UpdateLayerDto {
   id: string;
-  layerList: [];
+  layerInfo: Record<string, any>;
 }
