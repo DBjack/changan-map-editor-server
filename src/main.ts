@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { TransformInterceptor } from './common/transform.interceptor';
+import { AllExceptionsFilter } from './common/http-exception.filter';
 
 async function bootstrap() {
   try {
@@ -9,6 +10,9 @@ async function bootstrap() {
 
     // 注册全局响应拦截器
     app.useGlobalInterceptors(new TransformInterceptor());
+
+    // 注册全局异常过滤器
+    app.useGlobalFilters(new AllExceptionsFilter());
 
     // 设置全局 API 前缀
     app.setGlobalPrefix(process.env.API_PREFIX || 'v1');
