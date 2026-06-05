@@ -170,6 +170,20 @@ pm2 flush
 http://localhost:3000/v1/api-docs
 ```
 
+**生产环境 Swagger 说明：**
+
+- 默认情况下，生产环境（`NODE_ENV=production`）会**自动禁用** Swagger
+- 如需在生产环境启用 Swagger，设置环境变量：`ENABLE_SWAGGER=true`
+- PM2 配置中已默认启用，可在 `ecosystem.config.js` 中修改
+
+```env
+# .env.production
+NODE_ENV=production
+ENABLE_SWAGGER=true  # 设为 false 可禁用 Swagger
+```
+
+> ⚠️ **安全提示**：生产环境建议禁用 Swagger 或添加访问保护，避免暴露 API 信息
+
 ## API 接口
 
 ### 图层管理

@@ -27,19 +27,30 @@ async function bootstrap() {
     // 设置全局 API 前缀
     app.setGlobalPrefix(process.env.API_PREFIX || 'v1');
 
-    const config = new DocumentBuilder()
-      .setTitle('长安地图编辑器 API')
-      .setDescription('机器人地图编辑后端服务 API 文档')
-      .setVersion('1.0.0')
-      .addTag('图层', '图层管理接口')
-      .addTag('默认', '默认接口')
-      .build();
+    // 生产环境不启用 Swagger（可通过环境变量控制）
+    const isProd = process.env.NODE_ENV === 'production';
+    const enableSwagger = process.env.ENABLE_SWAGGER !== 'false';
 
-    const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api', app, document);
+    if (!isProd || enableSwagger) {
+      const config = new DocumentBuilder()
+        .setTitle('长安地图编辑器 API')
+        .setDescription('机器人地图编辑后端服务 API 文档')
+        .setVersion('1.0.0')
+        .addTag('图层', '图层管理接口')
+        .addTag('默认', '默认接口')
+        .build();
+
+      const document = SwaggerModule.createDocument(app, config);
+      SwaggerModule.setup('api-docs', app, document);
+    }
 
     await app.listen(process.env.PORT ?? 3000);
     console.log(`应用已启动在 http://localhost:${process.env.PORT ?? 3000}`);
+    if (!isProd || enableSwagger) {
+      console.log(
+        `Swagger 文档地址：http://localhost:${process.env.PORT ?? 3000}/v1/api-docs`,
+      );
+    }
   } catch (error) {
     console.error('启动失败:', error.message);
     process.exit(1);
