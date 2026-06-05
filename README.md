@@ -93,6 +93,75 @@ pnpm run build
 pnpm run start:prod
 ```
 
+### PM2 部署
+
+项目已配置 PM2 进程管理器，支持生产环境部署。
+
+**1. 安装 PM2（如未全局安装）**
+
+```bash
+npm install -g pm2
+```
+
+**2. 构建项目**
+
+```bash
+pnpm run build
+```
+
+**3. 启动应用**
+
+```bash
+# 使用 PM2 启动
+pm2 start ecosystem.config.js --env production
+
+# 或者指定应用名称启动
+pm2 start ecosystem.config.js
+```
+
+**4. 查看应用状态**
+
+```bash
+# 查看所有应用状态
+pm2 status
+
+# 查看应用详细信息
+pm2 show changan-map-editor
+
+# 查看应用日志
+pm2 logs changan-map-editor
+```
+
+**5. 其他常用命令**
+
+```bash
+# 重启应用
+pm2 restart changan-map-editor
+
+# 停止应用
+pm2 stop changan-map-editor
+
+# 删除应用
+pm2 delete changan-map-editor
+
+# 开机自启（系统重启后自动启动）
+pm2 startup
+pm2 save
+```
+
+**6. 日志管理**
+
+日志文件保存在 `logs/` 目录下：
+
+- `pm2-err.log` - 错误日志
+- `pm2-out.log` - 输出日志
+- `pm2-combined.log` - 合并日志
+
+```bash
+# 清空日志
+pm2 flush
+```
+
 ### 访问 API 文档
 
 启动项目后，访问 Swagger 文档：
