@@ -4,6 +4,7 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
 
@@ -20,7 +21,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
-      message = exception.message;
+
+      // 处理 ValidationPipe 的详细错误信息
+      if (exception instanceof BadRequestException) {
+        const responseBody = exception.getResponse();
+        if (typeof responseBody === 'object' && responseBody !== null) {
+          // 提取 class-validator 的详细错误信息
+          const errors = (responseBody as any).message;
+          if (Array.isArray(errors)) {
+            message = errors.join('; ');
+          } else if (typeof errors === 'string') {
+            message = errors;
+          } else {
+            message = (responseBody as any).message || exception.message;
+          }
+        } else {
+          message = exception.message;
+        }
+      } else {
+        message = exception.message;
+      }
     } else if (exception instanceof Error) {
       message = exception.message;
     }

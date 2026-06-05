@@ -3,10 +3,20 @@ import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { TransformInterceptor } from './common/transform.interceptor';
 import { AllExceptionsFilter } from './common/http-exception.filter';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
   try {
     const app = await NestFactory.create(AppModule);
+
+    // 注册全局验证管道
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true, // 仅允许 DTO 中定义的属性
+        forbidNonWhitelisted: true, // 禁止传递未定义的属性
+        transform: true, // 自动将请求体转换为 DTO 类型
+      }),
+    );
 
     // 注册全局响应拦截器
     app.useGlobalInterceptors(new TransformInterceptor());

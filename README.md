@@ -1,98 +1,158 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 长安机器人地图编辑服务端
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+基于 NestJS 框架开发的机器人地图编辑系统后端服务，提供图层数据的增删改查功能。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 技术栈
 
-## Description
+- **框架**: NestJS 11
+- **语言**: TypeScript
+- **数据库**: MySQL
+- **ORM**: TypeORM
+- **API 文档**: Swagger
+- **包管理器**: pnpm
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 项目结构
 
-## Project setup
-
-```bash
-$ pnpm install
+```
+changan-map-editor/
+├── src/
+│   ├── common/           # 公共模块
+│   │   ├── database-init.service.ts    # 数据库初始化服务
+│   │   ├── http-exception.filter.ts    # 全局异常过滤器
+│   │   ├── response.ts                 # 统一响应格式
+│   │   └── transform.interceptor.ts    # 响应拦截器
+│   ├── dto/              # 数据传输对象
+│   │   └── Layer.ts      # 图层 DTO
+│   ├── entity/           # 数据库实体
+│   │   └── layerEntity.ts # 图层实体
+│   ├── layer/            # 图层模块
+│   │   ├── layer.controller.ts   # 控制器
+│   │   ├── layer.service.ts      # 服务层
+│   │   └── layer.module.ts       # 模块定义
+│   ├── vo/               # 视图对象
+│   │   └── layer.vo.ts   # 图层 VO
+│   ├── app.module.ts     # 主模块
+│   └── main.ts           # 入口文件
+├── .env                  # 开发环境配置
+├── .env.production       # 生产环境配置
+└── package.json
 ```
 
-## Compile and run the project
+## 快速开始
+
+### 环境要求
+
+- Node.js >= 18
+- MySQL >= 8.0
+- pnpm
+
+### 安装依赖
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+pnpm install
 ```
 
-## Run tests
+### 配置数据库
+
+1. 复制 `.env` 文件，根据实际需求修改配置：
+
+```env
+# 数据库配置
+DB_HOST=localhost
+DB_PORT=3306
+DB_USERNAME=root
+DB_PASSWORD=Root@123456
+DB_DATABASE=layer
+
+# 服务器配置
+PORT=3000
+
+# 环境配置
+NODE_ENV=development
+DB_SYNC=true
+API_PREFIX=v1
+```
+
+2. 初始化数据库（可选）：
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+node scripts/init-db.js
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 运行项目
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+# 开发模式（热重载）
+pnpm run start:dev
+
+# 调试模式
+pnpm run start:debug
+
+# 生产模式
+pnpm run build
+pnpm run start:prod
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### 访问 API 文档
 
-## Resources
+启动项目后，访问 Swagger 文档：
 
-Check out a few resources that may come in handy when working with NestJS:
+```
+http://localhost:3000/v1/api-docs
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## API 接口
 
-## Support
+### 图层管理
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+所有接口均以 `/v1/layer` 为前缀
 
-## Stay in touch
+#### 1. 获取图层列表
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```
+GET /v1/layer/list/:id
+```
+
+**参数**:
+
+- `id`: 图层 ID
+
+**响应示例**:
+
+```json
+{
+  "code": 200,
+  "data": [],
+  "message": "success"
+}
+```
+
+#### 2. 更新图层
+
+```
+POST /v1/layer/update
+```
+
+**请求体**:
+
+```json
+{
+  "id": 1,
+  "name": "图层名称",
+  "data": {}
+}
+```
+
+#### 3. 删除图层
+
+```
+GET /v1/layer/delete/:id
+```
+
+**参数**:
+
+- `id`: 图层 ID
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+UNLICENSED
