@@ -23,7 +23,7 @@ import { DatabaseInitService } from './common/database-init.service';
         password: configService.get('DB_PASSWORD', 'Root@123456'),
         database: configService.get('DB_DATABASE', 'layer'),
         entities: ['dist/**/*.entity{.ts,.js}', 'dist/**/*Entity{.ts,.js}'],
-        autoLoadEntities: true,
+        autoLoadEntities: true, // 自动加载实体类
         synchronize: configService.get('DB_SYNC', 'true') === 'true', // 开发环境建议开启，生产环境建议关闭,自动同步数据库表结构
       }),
       inject: [ConfigService],
