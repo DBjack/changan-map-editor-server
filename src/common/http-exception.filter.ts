@@ -9,6 +9,30 @@ import {
 import { Request, Response } from 'express';
 import { Logger } from '@nestjs/common';
 
+const getMessage = (value: unknown, fallback: string): string => {
+  if (Array.isArray(value)) {
+    return value.map((item) => getMessage(item, fallback)).join('; ');
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value.toString();
+  }
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  try {
+    return JSON.stringify(value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -33,11 +57,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
           const responseObj = responseBody as Record<string, unknown>;
           const errors = responseObj.message;
           if (Array.isArray(errors)) {
-            message = errors.join('; ');
+            message = getMessage(errors, exception.message);
           } else if (typeof errors === 'string') {
             message = errors;
           } else {
-            message = String(responseObj.message || exception.message);
+            message = getMessage(responseObj.message, exception.message);
           }
         } else {
           message = exception.message;

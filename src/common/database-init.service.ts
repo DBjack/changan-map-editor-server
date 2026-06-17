@@ -2,6 +2,24 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as mysql from 'mysql2/promise';
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (typeof error === 'number' || typeof error === 'boolean') {
+    return error.toString();
+  }
+
+  try {
+    return JSON.stringify(error) ?? 'Unknown error';
+  } catch {
+    return 'Unknown error';
+  }
+};
+
 @Injectable()
 export class DatabaseInitService implements OnModuleInit {
   private readonly logger = new Logger(DatabaseInitService.name);
@@ -40,8 +58,8 @@ export class DatabaseInitService implements OnModuleInit {
 
       this.logger.log(`✅ 数据库 '${database}' 已准备就绪`);
       await connection.end();
-    } catch (error) {
-      this.logger.error(`❌ 数据库初始化失败: ${error.message}`);
+    } catch (error: unknown) {
+      this.logger.error(`❌ 数据库初始化失败: ${getErrorMessage(error)}`);
       throw error;
     }
   }
