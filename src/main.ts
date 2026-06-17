@@ -48,7 +48,7 @@ async function bootstrap() {
     console.log(`应用已启动在 http://localhost:${process.env.PORT ?? 3000}`);
     if (!isProd || enableSwagger) {
       console.log(
-        `Swagger 文档地址：http://localhost:${process.env.PORT ?? 3000}/v1/api-docs`,
+        `Swagger 文档地址：http://localhost:${process.env.PORT ?? 3000}/api-docs`,
       );
     }
   } catch (error) {
