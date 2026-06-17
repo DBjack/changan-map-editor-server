@@ -1,6 +1,6 @@
 export class AppResponse {
   static success(
-    data: any = null,
+    data: unknown = null,
     message: string = '操作成功',
     code: number = 200,
   ) {
@@ -15,7 +15,7 @@ export class AppResponse {
   static error(
     message: string = '操作失败',
     code: number = 500,
-    data: any = null,
+    data: unknown = null,
   ) {
     return {
       code,

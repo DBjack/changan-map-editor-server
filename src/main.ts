@@ -52,8 +52,8 @@ async function bootstrap() {
       );
     }
   } catch (error) {
-    console.error('启动失败:', error.message);
+    console.error('启动失败:', (error as Error).message);
     process.exit(1);
   }
 }
-bootstrap();
+void bootstrap();

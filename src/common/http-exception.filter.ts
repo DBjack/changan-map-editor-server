@@ -30,13 +30,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const responseBody = exception.getResponse();
         if (typeof responseBody === 'object' && responseBody !== null) {
           // 提取 class-validator 的详细错误信息
-          const errors = (responseBody as any).message;
+          const responseObj = responseBody as Record<string, unknown>;
+          const errors = responseObj.message;
           if (Array.isArray(errors)) {
             message = errors.join('; ');
           } else if (typeof errors === 'string') {
             message = errors;
           } else {
-            message = (responseBody as any).message || exception.message;
+            message = String(responseObj.message || exception.message);
           }
         } else {
           message = exception.message;
@@ -59,16 +60,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       stack: isProduction ? undefined : (exception as Error).stack,
     };
 
-    if (status >= 500) {
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error('服务器错误', JSON.stringify(logMessage));
-    } else if (status >= 400) {
+    } else if (status >= HttpStatus.BAD_REQUEST) {
       this.logger.warn('客户端错误', JSON.stringify(logMessage));
     } else {
       this.logger.log('请求完成', JSON.stringify(logMessage));
     }
 
     // 统一错误响应格式
-    const errorResponse: any = {
+    const errorResponse: Record<string, unknown> = {
       code: status,
       message,
       data: null,
