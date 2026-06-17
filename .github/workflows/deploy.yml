@@ -65,7 +65,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          source: 'dist/**,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,ecosystem.config.js'
+          source: 'dist/**,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,ecosystem.config.js,.env.production'
           target: /var/www/changan-map-editor/
 
       - name: Restart application

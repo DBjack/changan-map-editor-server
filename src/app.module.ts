@@ -11,6 +11,7 @@ import { DatabaseInitService } from './common/database-init.service';
     // 加载环境变量
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
     }),
     // 配置数据库连接
     TypeOrmModule.forRootAsync({
