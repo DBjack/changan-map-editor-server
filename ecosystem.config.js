@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'changan-map-editor',
-      script: 'npm run start:prod',
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -12,7 +12,7 @@ module.exports = {
       },
       env_production: {
         NODE_ENV: 'production',
-        ENABLE_SWAGGER: 'true', // 生产环境是否启用 Swagger，设为 false 可禁用
+        ENABLE_SWAGGER: 'true',
       },
       error_file: './logs/pm2-err.log',
       out_file: './logs/pm2-out.log',

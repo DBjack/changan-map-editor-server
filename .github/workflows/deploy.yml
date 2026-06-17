@@ -49,6 +49,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -62,7 +65,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          source: 'dist/**,package.json,pnpm-lock.yaml'
+          source: 'dist/**,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,ecosystem.config.js'
           target: /var/www/changan-map-editor/
 
       - name: Restart application
@@ -72,7 +75,11 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
+          script_stop: true
           script: |
+            set -e
+            mkdir -p /var/www/changan-map-editor/logs
             cd /var/www/changan-map-editor
-            pnpm install --prod
-            pm2 restart changan-map-editor
+            pnpm install --prod --frozen-lockfile --ignore-scripts
+            pm2 startOrRestart ecosystem.config.js --env production
+            pm2 save
