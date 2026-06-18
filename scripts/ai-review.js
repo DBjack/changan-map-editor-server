@@ -4,9 +4,8 @@ const path = require('path');
 
 require('dotenv').config();
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_API_URL =
-  process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
+const AI_API_KEY = process.env.AI_API_KEY;
+const AI_PROVIDER = process.env.AI_PROVIDER || 'gemini';
 const REVIEW_SEVERITY = process.env.REVIEW_SEVERITY || 'warning';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
@@ -61,19 +60,9 @@ function readFileContent(filePath) {
   }
 }
 
-async function callOpenAI(prompt) {
-  const response = await fetch(OPENAI_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'MiniMax-M2.7',
-      messages: [
-        {
-          role: 'system',
-          content: `你是一位资深的 NestJS 后端代码审查专家。请审查以下代码，关注以下方面：
+async function callAI(prompt) {
+  try {
+    const systemPrompt = `你是一位资深的 NestJS 后端代码审查专家。请审查以下代码，关注以下方面：
 1. 安全性：SQL 注入、XSS、认证绕过等安全漏洞
 2. 代码质量：代码结构、命名规范、可读性、重复代码
 3. 最佳实践：是否符合 NestJS 最佳实践、TypeScript 规范
@@ -95,20 +84,112 @@ async function callOpenAI(prompt) {
   ]
 }
 
-只输出 JSON，不要包含其他文本。`,
+只输出 JSON，不要包含其他文本。`;
+
+    if (AI_PROVIDER === 'gemini') {
+      const model = process.env.AI_MODEL || 'gemini-1.5-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${AI_API_KEY}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.2,
-    }),
-  });
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: systemPrompt }],
+            },
+            {
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: 'application/json',
+          },
+        }),
+        timeout: 60000,
+      });
 
-  if (!response.ok) {
-    throw new Error(`API 调用失败: ${response.status} ${response.statusText}`);
+      if (!response.ok) {
+        let errorMessage = `Gemini API 调用失败: ${response.status} ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
+          }
+        } catch {
+          const text = await response.text();
+          if (text) {
+            errorMessage += ` - ${text.substring(0, 200)}`;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      if (
+        !data.candidates ||
+        !data.candidates[0] ||
+        !data.candidates[0].content ||
+        !data.candidates[0].content.parts
+      ) {
+        throw new Error('Gemini API 返回格式不正确');
+      }
+      return data.candidates[0].content.parts.map((p) => p.text).join('');
+    }
+
+    const url =
+      process.env.OPENAI_API_URL ||
+      'https://api.openai.com/v1/chat/completions';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${AI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+      }),
+      timeout: 60000,
+    });
+
+    if (!response.ok) {
+      let errorMessage = `API 调用失败: ${response.status} ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
+        }
+      } catch {
+        const text = await response.text();
+        if (text) {
+          errorMessage += ` - ${text.substring(0, 200)}`;
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('API 返回格式不正确');
+    }
+    return data.choices[0].message.content;
+  } catch (error) {
+    if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+      const url =
+        AI_PROVIDER === 'gemini'
+          ? 'generativelanguage.googleapis.com'
+          : process.env.OPENAI_API_URL || 'api.openai.com';
+      throw new Error(`网络连接失败: ${error.code} - ${url}`);
+    }
+    throw error;
   }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
 }
 
 function parseReviewResult(content) {
@@ -284,12 +365,12 @@ async function postGitHubComment(prNumber, comment) {
 }
 
 async function main() {
-  if (!OPENAI_API_KEY) {
-    console.log('⚠️ OPENAI_API_KEY 未设置，跳过 AI 审查');
+  if (!AI_API_KEY) {
+    console.log('⚠️ AI_API_KEY 未设置，跳过 AI 审查');
     process.exit(0);
   }
 
-  console.log('🚀 开始 AI 代码审查...');
+  console.log(`🚀 开始 AI 代码审查... (Provider: ${AI_PROVIDER})`);
 
   const files = getChangedFiles();
   console.log(`📋 待审查文件数: ${files.length}`);
@@ -320,7 +401,7 @@ async function main() {
     const prompt = `请审查以下 NestJS 代码文件：\n\n${fileContents.join('\n')}`;
 
     try {
-      const result = await callOpenAI(prompt);
+      const result = await callAI(prompt);
       const parsed = parseReviewResult(result);
       allIssues = [...allIssues, ...parsed.issues];
     } catch (error) {
