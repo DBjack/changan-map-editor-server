@@ -30,6 +30,13 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      - name: AI Code Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_URL: ${{ secrets.OPENAI_API_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm run ai-review
+
       - name: Test
         run: pnpm run test
 
