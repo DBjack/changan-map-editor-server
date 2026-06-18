@@ -69,7 +69,7 @@ async function callOpenAI(prompt) {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'MiniMax-M2.7',
       messages: [
         {
           role: 'system',
