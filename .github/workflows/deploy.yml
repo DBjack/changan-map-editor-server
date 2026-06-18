@@ -36,7 +36,9 @@ jobs:
       - name: AI Code Review
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'gemini' }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'openai' }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL || 'deepseek-v4-flash' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm run ai-review
 

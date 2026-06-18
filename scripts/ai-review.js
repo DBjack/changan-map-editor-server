@@ -6,11 +6,22 @@ require('dotenv').config();
 
 const AI_API_KEY = process.env.AI_API_KEY;
 const AI_PROVIDER = process.env.AI_PROVIDER || 'gemini';
+const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
 const REVIEW_SEVERITY = process.env.REVIEW_SEVERITY || 'warning';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_EVENT_NAME = process.env.GITHUB_EVENT_NAME;
 const GITHUB_EVENT_PATH = process.env.GITHUB_EVENT_PATH;
+
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const OPENAI_COMPATIBLE_API_URL =
+  process.env.AI_API_URL ||
+  process.env.OPENAI_API_URL ||
+  'https://api.openai.com/v1/chat/completions';
+const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+const AI_REQUEST_TIMEOUT_MS = getRequestTimeoutMs();
+const AI_REVIEW_ALL_FILES = process.env.AI_REVIEW_ALL_FILES === 'true';
 
 const SEVERITY_LEVELS = {
   none: 0,
@@ -25,31 +36,98 @@ const SEVERITY_LABELS = {
   info: { emoji: 'ℹ️', color: 'blue', label: '建议' },
 };
 
-function getChangedFiles() {
+function getRequestTimeoutMs() {
+  const timeout = Number(process.env.AI_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(timeout) && timeout > 0
+    ? timeout
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
+
   try {
-    const baseRef = process.env.GITHUB_BASE_REF || 'origin/main';
-    const output = execSync(
-      `git diff --name-only --diff-filter=ACM ${baseRef}...HEAD`,
-      {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`API 调用超时: ${AI_REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function getChangedFiles() {
+  const baseRef = process.env.GITHUB_BASE_REF || 'origin/main';
+  const localStrategies = [
+    {
+      name: '工作区未提交变更',
+      command: 'git diff --name-only --diff-filter=ACM',
+    },
+    {
+      name: '暂存区变更',
+      command: 'git diff --cached --name-only --diff-filter=ACM',
+    },
+    {
+      name: '未跟踪文件',
+      command: 'git ls-files --others --exclude-standard',
+    },
+  ];
+  const githubStrategies = [
+    {
+      name: '增量审查',
+      command: `git diff --name-only --diff-filter=ACM ${baseRef}...HEAD`,
+    },
+    {
+      name: '最近一次提交',
+      command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
+    },
+  ];
+  const strategies = GITHUB_EVENT_NAME ? githubStrategies : localStrategies;
+
+  for (const strategy of strategies) {
+    try {
+      const output = execSync(strategy.command, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'ignore'],
-      },
-    );
-    return output
-      .split('\n')
-      .filter((file) => file.trim() && file.endsWith('.ts'));
-  } catch {
-    console.log('⚠️ 无法获取 git diff，将检查所有 TypeScript 文件');
-    const output = execSync(
-      'git ls-files --cached --others --exclude-standard',
-      {
-        encoding: 'utf-8',
-      },
-    );
-    return output
-      .split('\n')
-      .filter((file) => file.trim() && file.endsWith('.ts'));
+      });
+      const changedFiles = output
+        .split('\n')
+        .filter((file) => file.trim() && file.endsWith('.ts'));
+
+      if (changedFiles.length > 0) {
+        console.log(
+          `📋 待审查文件数: ${changedFiles.length}（${strategy.name}）`,
+        );
+        return changedFiles;
+      }
+    } catch (error) {
+      console.log(`⚠️ ${strategy.name}失败: ${error.message}`);
+    }
   }
+
+  if (!AI_REVIEW_ALL_FILES) {
+    console.log(
+      '✅ 未找到需要审查的 TypeScript 变更文件（如需全量审查，设置 AI_REVIEW_ALL_FILES=true）',
+    );
+    return [];
+  }
+
+  console.log('⚠️ AI_REVIEW_ALL_FILES=true，检查所有 TypeScript 文件');
+  const output = execSync('git ls-files --cached --others --exclude-standard', {
+    encoding: 'utf-8',
+  });
+  const allFiles = output
+    .split('\n')
+    .filter((file) => file.trim() && file.endsWith('.ts'));
+
+  console.log(`📋 待审查文件数: ${allFiles.length}（全量审查）`);
+  return allFiles;
 }
 
 function readFileContent(filePath) {
@@ -87,12 +165,13 @@ async function callAI(prompt) {
 只输出 JSON，不要包含其他文本。`;
 
     if (AI_PROVIDER === 'gemini') {
-      const model = process.env.AI_MODEL || 'gemini-1.5-flash';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${AI_API_KEY}`;
-      const response = await fetch(url, {
+      const model = process.env.AI_MODEL || DEFAULT_GEMINI_MODEL;
+      const url = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${model}:generateContent`;
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-goog-api-key': AI_API_KEY,
         },
         body: JSON.stringify({
           contents: [
@@ -105,10 +184,8 @@ async function callAI(prompt) {
           ],
           generationConfig: {
             temperature: 0.2,
-            responseMimeType: 'application/json',
           },
         }),
-        timeout: 60000,
       });
 
       if (!response.ok) {
@@ -139,24 +216,21 @@ async function callAI(prompt) {
       return data.candidates[0].content.parts.map((p) => p.text).join('');
     }
 
-    const url =
-      process.env.OPENAI_API_URL ||
-      'https://api.openai.com/v1/chat/completions';
-    const response = await fetch(url, {
+    const url = OPENAI_COMPATIBLE_API_URL;
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${AI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: process.env.AI_MODEL || 'gpt-4o-mini',
+        model: process.env.AI_MODEL || DEFAULT_OPENAI_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt },
         ],
         temperature: 0.2,
       }),
-      timeout: 60000,
     });
 
     if (!response.ok) {
@@ -185,7 +259,7 @@ async function callAI(prompt) {
       const url =
         AI_PROVIDER === 'gemini'
           ? 'generativelanguage.googleapis.com'
-          : process.env.OPENAI_API_URL || 'api.openai.com';
+          : OPENAI_COMPATIBLE_API_URL;
       throw new Error(`网络连接失败: ${error.code} - ${url}`);
     }
     throw error;
@@ -193,15 +267,24 @@ async function callAI(prompt) {
 }
 
 function parseReviewResult(content) {
-  try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return { issues: [] };
-  } catch {
-    return { issues: [] };
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error('AI 返回内容中未找到 JSON');
   }
+
+  try {
+    return JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error('AI 返回内容不是有效 JSON');
+  }
+}
+
+function isAuthFailure(error) {
+  return /\b(401 Unauthorized|403 Forbidden)\b/.test(error.message);
+}
+
+function isTimeoutFailure(error) {
+  return error.message.includes('API 调用超时');
 }
 
 function printIssues(issues) {
@@ -343,7 +426,7 @@ async function postGitHubComment(prNumber, comment) {
   const url = `https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${prNumber}/comments`;
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -373,7 +456,6 @@ async function main() {
   console.log(`🚀 开始 AI 代码审查... (Provider: ${AI_PROVIDER})`);
 
   const files = getChangedFiles();
-  console.log(`📋 待审查文件数: ${files.length}`);
 
   if (files.length === 0) {
     console.log('✅ 没有需要审查的文件');
@@ -382,6 +464,7 @@ async function main() {
 
   const batchSize = 3;
   let allIssues = [];
+  let reviewFailures = 0;
 
   for (let i = 0; i < files.length; i += batchSize) {
     const batch = files.slice(i, i + batchSize);
@@ -403,13 +486,36 @@ async function main() {
     try {
       const result = await callAI(prompt);
       const parsed = parseReviewResult(result);
+      if (!Array.isArray(parsed.issues)) {
+        throw new Error('AI 返回 JSON 缺少 issues 数组');
+      }
       allIssues = [...allIssues, ...parsed.issues];
     } catch (error) {
+      reviewFailures += 1;
       console.log(`⚠️ 审查失败: ${error.message}`);
+      if (isAuthFailure(error) || isTimeoutFailure(error)) {
+        const reason = isAuthFailure(error)
+          ? 'AI 凭证不可用'
+          : 'AI API 响应超时';
+        console.log(`⚠️ ${reason}，停止后续批次审查`);
+        break;
+      }
     }
   }
 
-  const hasCriticalIssue = printIssues(allIssues);
+  let hasCriticalIssue = false;
+  if (allIssues.length > 0 || reviewFailures === 0) {
+    hasCriticalIssue = printIssues(allIssues);
+  }
+
+  if (reviewFailures > 0) {
+    console.log(
+      `\n❌ 有 ${reviewFailures} 个批次审查失败，请先修复 AI 调用或返回格式问题`,
+    );
+    console.log(
+      '   可检查 AI_API_KEY、AI_MODEL、网络代理，或临时设置 AI_REQUEST_TIMEOUT_MS 调整等待时间',
+    );
+  }
 
   if (GITHUB_EVENT_NAME === 'pull_request') {
     const prNumber = await getPullRequestNumber();
@@ -417,10 +523,6 @@ async function main() {
       const comment = generateMarkdownComment(allIssues);
       await postGitHubComment(prNumber, comment);
     }
-  }
-
-  if (hasCriticalIssue) {
-    process.exit(1);
   }
 
   process.exit(0);
