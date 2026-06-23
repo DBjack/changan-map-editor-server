@@ -230,15 +230,35 @@ async function callAI(prompt) {
 }
 
 function parseReviewResult(content) {
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  let cleanedContent = content.trim();
+
+  cleanedContent = cleanedContent.replace(/^```json\s*/i, '');
+  cleanedContent = cleanedContent.replace(/\s*```$/i, '');
+  cleanedContent = cleanedContent.replace(/^```\s*/, '');
+  cleanedContent = cleanedContent.replace(/\s*```$/, '');
+
+  const jsonMatch = cleanedContent.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    throw new Error('AI 返回内容中未找到 JSON');
+    throw new Error(
+      `AI 返回内容中未找到 JSON，原始响应: ${content.substring(0, 500)}`,
+    );
   }
 
+  let jsonString = jsonMatch[0];
+
   try {
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    throw new Error('AI 返回内容不是有效 JSON');
+    return JSON.parse(jsonString);
+  } catch (parseError) {
+    jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
+    jsonString = jsonString.replace(/([^\\])'/g, '$1"');
+
+    try {
+      return JSON.parse(jsonString);
+    } catch (secondParseError) {
+      throw new Error(
+        `AI 返回内容不是有效 JSON，错误: ${parseError.message}，第二次解析错误: ${secondParseError.message}，原始响应: ${content.substring(0, 500)}`,
+      );
+    }
   }
 }
 
