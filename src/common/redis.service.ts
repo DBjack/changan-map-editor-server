@@ -20,7 +20,10 @@ export class RedisService {
 
   async getJson<T>(key: string): Promise<T | null> {
     const data = await this.redis.get(key);
-    return data ? JSON.parse(data) : null;
+    if (!data || data === 'null') {
+      return null;
+    }
+    return JSON.parse(data) as T;
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {

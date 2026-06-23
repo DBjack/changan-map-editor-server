@@ -23,8 +23,7 @@ import { RedisModule } from './common/redis.module';
         username: configService.get('DB_USERNAME', 'root'),
         password: configService.get('DB_PASSWORD', 'Root@123456'),
         database: configService.get('DB_DATABASE', 'layer'),
-        entities: ['dist/**/*.entity{.ts,.js}', 'dist/**/*Entity{.ts,.js}'],
-        autoLoadEntities: true,
+        autoLoadEntities: true, // 自动加载TypeOrmModule.forFeature方法中指定的实体类
         synchronize: configService.get('DB_SYNC', 'true') === 'true',
       }),
       inject: [ConfigService],
