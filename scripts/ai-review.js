@@ -13,7 +13,6 @@ const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_EVENT_NAME = process.env.GITHUB_EVENT_NAME;
 const GITHUB_EVENT_PATH = process.env.GITHUB_EVENT_PATH;
 
-const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const OPENAI_COMPATIBLE_API_URL =
   process.env.AI_API_URL ||
@@ -22,6 +21,22 @@ const OPENAI_COMPATIBLE_API_URL =
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
 const AI_REQUEST_TIMEOUT_MS = getRequestTimeoutMs();
 const AI_REVIEW_ALL_FILES = process.env.AI_REVIEW_ALL_FILES === 'true';
+
+function maskSecret(secret) {
+  if (!secret) return '未设置';
+  if (secret.length <= 8) return '****';
+  return secret.slice(0, 4) + '****' + secret.slice(-4);
+}
+
+function validateApiKey(key) {
+  if (!key) {
+    return { valid: false, message: 'API Key 未设置' };
+  }
+  if (!/^sk-[A-Za-z0-9]{20,}$/.test(key)) {
+    return { valid: false, message: 'API Key 格式不正确' };
+  }
+  return { valid: true, message: '' };
+}
 
 const SEVERITY_LEVELS = {
   none: 0,
@@ -163,58 +178,6 @@ async function callAI(prompt) {
 }
 
 只输出 JSON，不要包含其他文本。`;
-
-    if (AI_PROVIDER === 'gemini') {
-      const model = process.env.AI_MODEL || DEFAULT_GEMINI_MODEL;
-      const url = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${model}:generateContent`;
-      const response = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': AI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: systemPrompt }],
-            },
-            {
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        let errorMessage = `Gemini API 调用失败: ${response.status} ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.error) {
-            errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
-          }
-        } catch {
-          const text = await response.text();
-          if (text) {
-            errorMessage += ` - ${text.substring(0, 200)}`;
-          }
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      if (
-        !data.candidates ||
-        !data.candidates[0] ||
-        !data.candidates[0].content ||
-        !data.candidates[0].content.parts
-      ) {
-        throw new Error('Gemini API 返回格式不正确');
-      }
-      return data.candidates[0].content.parts.map((p) => p.text).join('');
-    }
 
     const url = OPENAI_COMPATIBLE_API_URL;
     const response = await fetchWithTimeout(url, {
@@ -448,8 +411,10 @@ async function postGitHubComment(prNumber, comment) {
 }
 
 async function main() {
-  if (!AI_API_KEY) {
-    console.log('⚠️ AI_API_KEY 未设置，跳过 AI 审查');
+  const keyValidation = validateApiKey(AI_API_KEY);
+  if (!keyValidation.valid) {
+    console.log(`⚠️ ${keyValidation.message}，跳过 AI 审查`);
+    console.log(`   当前 API Key: ${maskSecret(AI_API_KEY)}`);
     process.exit(0);
   }
 
@@ -512,8 +477,9 @@ async function main() {
     console.log(
       `\n❌ 有 ${reviewFailures} 个批次审查失败，请先修复 AI 调用或返回格式问题`,
     );
+    console.log(`   当前 API Key: ${maskSecret(AI_API_KEY)}`);
     console.log(
-      '   可检查 AI_API_KEY、AI_MODEL、网络代理，或临时设置 AI_REQUEST_TIMEOUT_MS 调整等待时间',
+      '   可检查 API Key、模型配置、网络代理，或临时设置 AI_REQUEST_TIMEOUT_MS 调整等待时间',
     );
   }
 
