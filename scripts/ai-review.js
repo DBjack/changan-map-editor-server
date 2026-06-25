@@ -12,6 +12,11 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_EVENT_NAME = process.env.GITHUB_EVENT_NAME;
 const GITHUB_EVENT_PATH = process.env.GITHUB_EVENT_PATH;
+const CI_PROJECT_PATH = process.env.CI_PROJECT_PATH;
+const CI_COMMIT_REF_NAME = process.env.CI_COMMIT_REF_NAME;
+const CI_PIPELINE_SOURCE = process.env.CI_PIPELINE_SOURCE;
+const CI_MERGE_REQUEST_TARGET_BRANCH_NAME =
+  process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const OPENAI_COMPATIBLE_API_URL =
@@ -78,7 +83,10 @@ async function fetchWithTimeout(url, options = {}) {
 }
 
 function getChangedFiles() {
-  const baseRef = process.env.GITHUB_BASE_REF || 'origin/main';
+  const baseRef =
+    process.env.GITHUB_BASE_REF ||
+    process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME ||
+    'origin/main';
   const localStrategies = [
     {
       name: '工作区未提交变更',
@@ -103,7 +111,24 @@ function getChangedFiles() {
       command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
     },
   ];
-  const strategies = GITHUB_EVENT_NAME ? githubStrategies : localStrategies;
+  const gitlabStrategies = [
+    {
+      name: 'GitLab MR 增量审查',
+      command: `git diff --name-only --diff-filter=ACM ${baseRef}...HEAD`,
+    },
+    {
+      name: 'GitLab 分支提交',
+      command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
+    },
+  ];
+  let strategies;
+  if (GITHUB_EVENT_NAME) {
+    strategies = githubStrategies;
+  } else if (CI_PIPELINE_SOURCE) {
+    strategies = gitlabStrategies;
+  } else {
+    strategies = localStrategies;
+  }
 
   for (const strategy of strategies) {
     try {
@@ -378,26 +403,30 @@ function generateMarkdownComment(issues) {
 }
 
 async function getPullRequestNumber() {
-  if (GITHUB_EVENT_NAME !== 'pull_request') {
-    return null;
-  }
+  if (GITHUB_EVENT_NAME === 'pull_request') {
+    try {
+      if (GITHUB_EVENT_PATH && fs.existsSync(GITHUB_EVENT_PATH)) {
+        const eventData = JSON.parse(
+          fs.readFileSync(GITHUB_EVENT_PATH, 'utf-8'),
+        );
+        return eventData.pull_request?.number;
+      }
 
-  try {
-    if (GITHUB_EVENT_PATH && fs.existsSync(GITHUB_EVENT_PATH)) {
-      const eventData = JSON.parse(fs.readFileSync(GITHUB_EVENT_PATH, 'utf-8'));
-      return eventData.pull_request?.number;
+      const output = execSync('git log --oneline -1', { encoding: 'utf-8' });
+      const prMatch = output.match(/#(\d+)/);
+      if (prMatch) {
+        return parseInt(prMatch[1], 10);
+      }
+    } catch {
+      console.log('⚠️ 无法获取 PR 编号');
     }
-
-    const output = execSync('git log --oneline -1', { encoding: 'utf-8' });
-    const prMatch = output.match(/#(\d+)/);
-    if (prMatch) {
-      return parseInt(prMatch[1], 10);
-    }
-  } catch {
-    console.log('⚠️ 无法获取 PR 编号');
   }
 
   return null;
+}
+
+function getMergeRequestIid() {
+  return process.env.CI_MERGE_REQUEST_IID;
 }
 
 async function postGitHubComment(prNumber, comment) {
@@ -425,6 +454,38 @@ async function postGitHubComment(prNumber, comment) {
     }
 
     console.log(`✅ 已成功在 PR #${prNumber} 上发表评论`);
+  } catch (error) {
+    console.log(`⚠️ 发表评论失败: ${error.message}`);
+  }
+}
+
+async function postGitLabComment(mrIid, comment) {
+  const gitlabToken = process.env.GITLAB_TOKEN;
+  const projectId = process.env.CI_PROJECT_ID;
+
+  if (!gitlabToken || !projectId) {
+    console.log('⚠️ GITLAB_TOKEN 或 CI_PROJECT_ID 未设置，跳过评论');
+    return;
+  }
+
+  const url = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`;
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${gitlabToken}`,
+      },
+      body: JSON.stringify({ body: comment }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`评论失败: ${error.message || JSON.stringify(error)}`);
+    }
+
+    console.log(`✅ 已成功在 MR #${mrIid} 上发表评论`);
   } catch (error) {
     console.log(`⚠️ 发表评论失败: ${error.message}`);
   }
@@ -508,6 +569,14 @@ async function main() {
     if (prNumber) {
       const comment = generateMarkdownComment(allIssues);
       await postGitHubComment(prNumber, comment);
+    }
+  }
+
+  if (CI_PIPELINE_SOURCE === 'merge_request_event') {
+    const mrIid = getMergeRequestIid();
+    if (mrIid) {
+      const comment = generateMarkdownComment(allIssues);
+      await postGitLabComment(mrIid, comment);
     }
   }
 
