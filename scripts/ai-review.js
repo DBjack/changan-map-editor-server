@@ -2,10 +2,14 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-require('dotenv').config();
+try {
+  require('dotenv').config();
+} catch {}
 
-const AI_API_KEY = process.env.AI_API_KEY;
-const AI_PROVIDER = process.env.AI_PROVIDER || 'gemini';
+const AI_API_KEY =
+  process.env.AI_API_KEY ||
+  'sk-afisciaiawtoiphupttwpcbolcnktpveeozyyktjcmyvlodh';
+const AI_PROVIDER = process.env.AI_PROVIDER || 'siliconflow';
 const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
 const REVIEW_SEVERITY = process.env.REVIEW_SEVERITY || 'warning';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -17,13 +21,14 @@ const CI_COMMIT_REF_NAME = process.env.CI_COMMIT_REF_NAME;
 const CI_PIPELINE_SOURCE = process.env.CI_PIPELINE_SOURCE;
 const CI_MERGE_REQUEST_TARGET_BRANCH_NAME =
   process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
+const CI_SERVER_URL = process.env.CI_SERVER_URL || 'https://gitlab.com';
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'nex-agi/Nex-N2-Pro';
 const OPENAI_COMPATIBLE_API_URL =
   process.env.AI_API_URL ||
   process.env.OPENAI_API_URL ||
-  'https://api.openai.com/v1/chat/completions';
-const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+  'https://api.siliconflow.cn/v1/chat/completions';
+const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 const AI_REQUEST_TIMEOUT_MS = getRequestTimeoutMs();
 const AI_REVIEW_ALL_FILES = process.env.AI_REVIEW_ALL_FILES === 'true';
 
@@ -37,7 +42,7 @@ function validateApiKey(key) {
   if (!key) {
     return { valid: false, message: 'API Key 未设置' };
   }
-  if (!/^sk-[A-Za-z0-9]{20,}$/.test(key)) {
+  if (!/^[A-Za-z0-9_-]{10,}$/.test(key)) {
     return { valid: false, message: 'API Key 格式不正确' };
   }
   return { valid: true, message: '' };
@@ -136,9 +141,10 @@ function getChangedFiles() {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'ignore'],
       });
+      console.log(strategy.name, output);
       const changedFiles = output
         .split('\n')
-        .filter((file) => file.trim() && file.endsWith('.ts'));
+        .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
 
       if (changedFiles.length > 0) {
         console.log(
@@ -153,18 +159,20 @@ function getChangedFiles() {
 
   if (!AI_REVIEW_ALL_FILES) {
     console.log(
-      '✅ 未找到需要审查的 TypeScript 变更文件（如需全量审查，设置 AI_REVIEW_ALL_FILES=true）',
+      '✅ 未找到需要审查的 JavaScript/TypeScript 变更文件（如需全量审查，设置 AI_REVIEW_ALL_FILES=true）',
     );
     return [];
   }
 
-  console.log('⚠️ AI_REVIEW_ALL_FILES=true，检查所有 TypeScript 文件');
+  console.log(
+    '⚠️ AI_REVIEW_ALL_FILES=true，检查所有 JavaScript/TypeScript 文件',
+  );
   const output = execSync('git ls-files --cached --others --exclude-standard', {
     encoding: 'utf-8',
   });
   const allFiles = output
     .split('\n')
-    .filter((file) => file.trim() && file.endsWith('.ts'));
+    .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
 
   console.log(`📋 待审查文件数: ${allFiles.length}（全量审查）`);
   return allFiles;
@@ -180,30 +188,16 @@ function readFileContent(filePath) {
 
 async function callAI(prompt) {
   try {
-    const systemPrompt = `你是一位资深的 NestJS 后端代码审查专家。请审查以下代码，关注以下方面：
-1. 安全性：SQL 注入、XSS、认证绕过等安全漏洞
+    const systemPrompt = `你是一位资深的 React/前端代码审查专家。请审查以下代码，关注以下方面：
+1. 安全性：XSS、CSRF、敏感信息泄露等安全漏洞
 2. 代码质量：代码结构、命名规范、可读性、重复代码
-3. 最佳实践：是否符合 NestJS 最佳实践、TypeScript 规范
-4. 性能：潜在的性能问题、N+1 查询等
-5. 错误处理：异常处理是否完善
-6. 类型安全：TypeScript 类型定义是否正确
+3. 最佳实践：是否符合 React 最佳实践、TypeScript 规范、Hooks 使用规范
+4. 性能：潜在的性能问题、不必要的重渲染、大数据列表优化等
+5. 错误处理：异常处理是否完善、边界情况处理
+6. 类型安全：TypeScript 类型定义是否正确、是否存在 any 滥用
 
-请以 JSON 格式输出审查结果，格式如下：
-{
-  "issues": [
-    {
-      "file": "文件名",
-      "line": 行号,
-      "severity": "info" | "warning" | "error",
-      "title": "问题标题",
-      "description": "问题详细描述",
-      "suggestion": "修复建议"
-    }
-  ]
-}
-
-只输出 JSON，不要包含其他文本。`;
-
+请严格按以下 JSON 格式输出，不要包含任何其他内容：
+{"issues":[{"file":"文件名","line":行号,"severity":"info|warning|error","title":"问题标题","description":"问题详细描述","suggestion":"修复建议"}]}`;
     const url = OPENAI_COMPATIBLE_API_URL;
     const response = await fetchWithTimeout(url, {
       method: 'POST',
@@ -220,7 +214,6 @@ async function callAI(prompt) {
         temperature: 0.2,
       }),
     });
-
     if (!response.ok) {
       let errorMessage = `API 调用失败: ${response.status} ${response.statusText}`;
       try {
@@ -241,7 +234,16 @@ async function callAI(prompt) {
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
       throw new Error('API 返回格式不正确');
     }
-    return data.choices[0].message.content;
+    const message = data.choices[0].message;
+    // 优先使用 content，如果为空则尝试使用 reasoning_content
+    let content = message.content;
+    if (!content || content.trim() === '') {
+      content = message.reasoning_content || '';
+    }
+    if (!content || content.trim() === '') {
+      throw new Error('AI 返回内容为空');
+    }
+    return content;
   } catch (error) {
     if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
       const url =
@@ -281,7 +283,9 @@ function parseReviewResult(content) {
       return JSON.parse(jsonString);
     } catch (secondParseError) {
       throw new Error(
-        `AI 返回内容不是有效 JSON，错误: ${parseError.message}，第二次解析错误: ${secondParseError.message}，原始响应: ${content.substring(0, 500)}`,
+        `AI 返回内容不是有效 JSON，错误: ${parseError.message}，第二次解析错误: ${
+          secondParseError.message
+        }，原始响应: ${content.substring(0, 500)}`,
       );
     }
   }
@@ -344,7 +348,9 @@ function printIssues(issues) {
 
   if (hasCriticalIssue) {
     console.log(
-      `\n❌ 发现 ${issues.filter((i) => SEVERITY_LEVELS[i.severity] >= minSeverity).length} 个严重问题`,
+      `\n❌ 发现 ${
+        issues.filter((i) => SEVERITY_LEVELS[i.severity] >= minSeverity).length
+      } 个严重问题`,
     );
   }
 
@@ -429,6 +435,118 @@ function getMergeRequestIid() {
   return process.env.CI_MERGE_REQUEST_IID;
 }
 
+async function getMergeRequestDiffRefs(mrIid) {
+  const gitlabToken = process.env.GITLAB_TOKEN;
+  const projectId = process.env.CI_PROJECT_ID;
+
+  if (!gitlabToken || !projectId) {
+    console.log('⚠️ GITLAB_TOKEN 或 CI_PROJECT_ID 未设置，跳过获取 diff_refs');
+    return null;
+  }
+
+  const url = `${CI_SERVER_URL}/api/v4/projects/${projectId}/merge_requests/${mrIid}`;
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${gitlabToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(
+        `获取 MR 信息失败: ${error.message || JSON.stringify(error)}`,
+      );
+    }
+
+    const data = await response.json();
+    if (data.diff_refs) {
+      console.log(`✅ 获取到 MR diff_refs: ${JSON.stringify(data.diff_refs)}`);
+      return data.diff_refs;
+    }
+
+    console.log('⚠️ MR 信息中未找到 diff_refs');
+    return null;
+  } catch (error) {
+    console.log(`⚠️ 获取 MR diff_refs 失败: ${error.message}`);
+    return null;
+  }
+}
+
+function generateInlineComment(issue) {
+  const label = SEVERITY_LABELS[issue.severity] || SEVERITY_LABELS.info;
+  return `${label.emoji} **[${label.label}]** ${issue.title}\n\n${issue.description}\n\n💡 ${issue.suggestion}`;
+}
+
+async function postGitLabInlineComment(mrIid, issue, diffRefs) {
+  const gitlabToken = process.env.GITLAB_TOKEN;
+  const projectId = process.env.CI_PROJECT_ID;
+
+  if (!gitlabToken || !projectId) {
+    console.log('⚠️ GITLAB_TOKEN 或 CI_PROJECT_ID 未设置，跳过行级评论');
+    return false;
+  }
+
+  if (!diffRefs) {
+    console.log('⚠️ 缺少 diff_refs，无法创建行级评论');
+    return false;
+  }
+
+  const url = `${CI_SERVER_URL}/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`;
+  const comment = generateInlineComment(issue);
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${gitlabToken}`,
+      },
+      body: JSON.stringify({
+        body: comment,
+        position: {
+          base_sha: diffRefs.base_sha,
+          head_sha: diffRefs.head_sha,
+          start_sha: diffRefs.start_sha,
+          new_path: issue.file,
+          new_line: issue.line,
+          position_type: 'text',
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      const errorMsg = error.message || JSON.stringify(error);
+      if (
+        errorMsg.includes('position') ||
+        errorMsg.includes('new_line') ||
+        errorMsg.includes('diff')
+      ) {
+        console.log(
+          `⚠️ 行 ${issue.line} 不在 MR diff 范围内，跳过行级评论（汇总评论已包含此问题）`,
+        );
+      } else {
+        console.log(
+          `⚠️ 行级评论失败 [${issue.file}:${issue.line}]: ${errorMsg}`,
+        );
+      }
+      return false;
+    }
+
+    console.log(`✅ 已成功在 ${issue.file}:${issue.line} 发表行级评论`);
+    return true;
+  } catch (error) {
+    console.log(
+      `⚠️ 行级评论失败 [${issue.file}:${issue.line}]: ${error.message}`,
+    );
+    return false;
+  }
+}
+
 async function postGitHubComment(prNumber, comment) {
   if (!GITHUB_TOKEN || !GITHUB_REPOSITORY) {
     console.log('⚠️ GITHUB_TOKEN 或 GITHUB_REPOSITORY 未设置，跳过评论');
@@ -468,7 +586,7 @@ async function postGitLabComment(mrIid, comment) {
     return;
   }
 
-  const url = `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`;
+  const url = `${CI_SERVER_URL}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`;
 
   try {
     const response = await fetchWithTimeout(url, {
@@ -508,7 +626,7 @@ async function main() {
     process.exit(0);
   }
 
-  const batchSize = 3;
+  const batchSize = 1;
   let allIssues = [];
   let reviewFailures = 0;
 
@@ -527,10 +645,11 @@ async function main() {
 
     if (fileContents.length === 0) continue;
 
-    const prompt = `请审查以下 NestJS 代码文件：\n\n${fileContents.join('\n')}`;
+    const prompt = `请审查以下 React/前端代码文件：\n\n${fileContents.join('\n')}`;
 
     try {
       const result = await callAI(prompt);
+      console.log(result, 'AI直出的内容');
       const parsed = parseReviewResult(result);
       if (!Array.isArray(parsed.issues)) {
         throw new Error('AI 返回 JSON 缺少 issues 数组');
@@ -577,6 +696,14 @@ async function main() {
     if (mrIid) {
       const comment = generateMarkdownComment(allIssues);
       await postGitLabComment(mrIid, comment);
+
+      if (allIssues.length > 0) {
+        console.log('\n📝 正在创建行级评论...');
+        const diffRefs = await getMergeRequestDiffRefs(mrIid);
+        for (const issue of allIssues) {
+          await postGitLabInlineComment(mrIid, issue, diffRefs);
+        }
+      }
     }
   }
 

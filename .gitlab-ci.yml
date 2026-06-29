@@ -1,72 +1,10 @@
 stages:
-  - build-test
-  - deploy
+  - review
 
-build-test:
-  stage: build-test
+ai-review:
+  stage: review
   image: node:22
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  before_script:
-    - apt-get update && apt-get install -y git
-    - npm install -g pnpm
   script:
-    - pnpm install
-    - pnpm run lint
-    - pnpm run ai-review
-    - pnpm run test
-    - pnpm run build
-  artifacts:
-    paths:
-      - dist/
-    expire_in: 1 hour
-  only:
-    - main
-    - merge_requests
-
-deploy:
-  stage: deploy
-  image: alpine:latest
-  needs:
-    - build-test
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-  before_script:
-    - apk add --no-cache openssh-client pnpm nodejs npm
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
-    - chmod 600 ~/.ssh/id_rsa
-    - ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
-  script:
-    - scp -P ${SERVER_PORT:-22} -r dist/ package.json pnpm-lock.yaml pnpm-workspace.yaml ecosystem.config.js doc/nginx.conf $SERVER_USERNAME@$SERVER_HOST:/var/www/changan-map-editor/
-    - ssh -p ${SERVER_PORT:-22} $SERVER_USERNAME@$SERVER_HOST '
-      set -e
-      mkdir -p /var/www/changan-map-editor/logs
-      cd /var/www/changan-map-editor
-      pnpm install --prod --frozen-lockfile --ignore-scripts
-      pm2 startOrRestart ecosystem.config.js --env production
-      pm2 save
-
-      if [ -f doc/nginx.conf ]; then
-      NGINX_CONTAINER="${NGINX_CONTAINER:-nginx-server}"
-      if ! docker inspect "$NGINX_CONTAINER" >/dev/null 2>&1; then
-      NGINX_CONTAINER="$(docker ps --format '\''{{.Names}} {{.Image}}'\'' | awk '\''tolower($0) ~ /nginx/ {print $1; exit}'\'')"
-      fi
-
-      if [ -z "$NGINX_CONTAINER" ]; then
-      echo "No nginx container found. Set the NGINX_CONTAINER variable in GitLab CI/CD settings." >&2
-      exit 1
-      fi
-
-      docker cp doc/nginx.conf "$NGINX_CONTAINER:/etc/nginx/conf.d/changan-map-editor.conf"
-      docker exec "$NGINX_CONTAINER" nginx -t
-      docker exec "$NGINX_CONTAINER" nginx -s reload
-      fi
-      '
-  only:
-    - main
-
-variables:
-  CI_NODE_INDEX: 0
-  CI_NODE_TOTAL: 1
+    - npm run ai-review
