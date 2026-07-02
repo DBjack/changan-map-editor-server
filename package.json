@@ -19,7 +19,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prepare": "husky",
-    "ai-review": "node scripts/ai-review.js",
+    "ai-review:dev": "cross-env NODE_ENV=development node scripts/ai-review.js",
+    "ai-review:prod": "cross-env NODE_ENV=production node scripts/ai-review.js",
     "ai-review:strict": "REVIEW_SEVERITY=error node scripts/ai-review.js"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "@nestjs/typeorm": "^11.0.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "ioredis": "^5.11.1",
     "mysql2": "^3.22.4",

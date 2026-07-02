@@ -1,14 +1,14 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
-const path = require('path');
 
 try {
   require('dotenv').config();
+  const env = process.env.NODE_ENV || 'development';
+  require('dotenv').config({ path: `.env.${env}` });
 } catch {}
 
 const AI_API_KEY = process.env.AI_API_KEY;
 const AI_PROVIDER = process.env.AI_PROVIDER || 'siliconflow';
-const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
 const REVIEW_SEVERITY = process.env.REVIEW_SEVERITY || 'warning';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
@@ -160,32 +160,47 @@ function readFileContent(filePath) {
 
 async function callAI(prompt) {
   try {
-    const systemPrompt = `你是一位资深的 React/前端代码审查专家。请审查以下代码，关注以下方面：
-1. 安全性：XSS、CSRF、敏感信息泄露等安全漏洞
+    const systemPrompt = `你是一位资深的 NestJS/Node.js 后端代码审查专家。请审查以下代码，关注以下方面：
+1. 安全性：SQL注入、XSS、敏感信息泄露、认证绕过等安全漏洞
 2. 代码质量：代码结构、命名规范、可读性、重复代码
-3. 最佳实践：是否符合 React 最佳实践、TypeScript 规范、Hooks 使用规范
-4. 性能：潜在的性能问题、不必要的重渲染、大数据列表优化等
+3. 最佳实践：是否符合 NestJS 最佳实践、TypeScript 规范
+4. 性能：潜在的性能问题、N+1 查询、内存泄漏等
 5. 错误处理：异常处理是否完善、边界情况处理
 6. 类型安全：TypeScript 类型定义是否正确、是否存在 any 滥用
 
-请严格按以下 JSON 格式输出，不要包含任何其他内容：
-{"issues":[{"file":"文件名","line":行号,"severity":"info|warning|error","title":"问题标题","description":"问题详细描述","suggestion":"修复建议"}]}`;
+## 输出要求
+- 必须返回合法的 JSON 格式，不要包含 Markdown 代码块标记（如 \`\`\`json）
+- 不要包含任何解释性文字或额外说明
+- 如果没有发现问题，返回 {"issues":[]}
+- issues 数组中的每个对象必须包含：file（文件名）、line（行号）、severity（info|warning|error）、title（问题标题）、description（问题详细描述）、suggestion（修复建议）
+
+## 示例输出
+{"issues":[{"file":"src/app.module.ts","line":26,"severity":"warning","title":"冗余配置","description":"entities 配置与 autoLoadEntities 功能重复","suggestion":"删除 entities 配置，仅保留 autoLoadEntities: true"}]}`;
     const url = OPENAI_COMPATIBLE_API_URL;
-    const response = await fetchWithTimeout(url, {
+    const body = JSON.stringify({
+      model: process.env.AI_MODEL || DEFAULT_OPENAI_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.1,
+    });
+    console.log(`📤 请求 URL: ${url}`);
+    console.log(`📤 请求体大小: ${body.length} 字符`);
+    console.log(`📤 超时时间: ${AI_REQUEST_TIMEOUT_MS}ms`);
+    console.log(`📤 开始请求...`);
+    const start = Date.now();
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${AI_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: process.env.AI_MODEL || DEFAULT_OPENAI_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-      }),
+      body: body,
     });
+    const duration = Date.now() - start;
+    console.log(`📤 响应时间: ${duration}ms`);
+    console.log(`📤 状态码: ${response.status}`);
     if (!response.ok) {
       let errorMessage = `API 调用失败: ${response.status} ${response.statusText}`;
       try {
@@ -231,6 +246,10 @@ async function callAI(prompt) {
 function parseReviewResult(content) {
   let cleanedContent = content.trim();
 
+  console.log(
+    `📤 AI 返回内容 (前500字符): ${cleanedContent.substring(0, 500)}`,
+  );
+
   cleanedContent = cleanedContent.replace(/^```json\s*/i, '');
   cleanedContent = cleanedContent.replace(/\s*```$/i, '');
   cleanedContent = cleanedContent.replace(/^```\s*/, '');
@@ -238,8 +257,15 @@ function parseReviewResult(content) {
 
   const jsonMatch = cleanedContent.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    const arrayMatch = cleanedContent.match(/\[.*?\]/);
+    if (arrayMatch && /^\[(\s*\d+\s*,?\s*)*\]$/.test(arrayMatch[0])) {
+      console.log('⚠️ AI 返回了数字数组，可能是模型问题，尝试请求重试');
+      throw new Error(
+        `AI 返回了无效格式（数字数组），原始响应前200字符: ${content.substring(0, 200)}`,
+      );
+    }
     throw new Error(
-      `AI 返回内容中未找到 JSON，原始响应: ${content.substring(0, 500)}`,
+      `AI 返回内容中未找到 JSON，原始响应前500字符: ${content.substring(0, 500)}`,
     );
   }
 
@@ -257,7 +283,7 @@ function parseReviewResult(content) {
       throw new Error(
         `AI 返回内容不是有效 JSON，错误: ${parseError.message}，第二次解析错误: ${
           secondParseError.message
-        }，原始响应: ${content.substring(0, 500)}`,
+        }，原始响应前500字符: ${content.substring(0, 500)}`,
       );
     }
   }
@@ -515,6 +541,9 @@ async function main() {
     }
   }
 
+  if (hasCriticalIssue || reviewFailures > 0) {
+    process.exit(1);
+  }
   process.exit(0);
 }
 
