@@ -1,11 +1,20 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 
 try {
   require('dotenv').config();
   const env = process.env.NODE_ENV || 'development';
-  require('dotenv').config({ path: `.env.${env}` });
+  const envFile = `.env.${env}`;
+  if (fs.existsSync(envFile)) {
+    require('dotenv').config({ path: envFile, override: true });
+  }
 } catch {}
+
+function sanitizeEnvName(name) {
+  if (!name || typeof name !== 'string') return 'development';
+  const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '');
+  return sanitized || 'development';
+}
 
 const AI_API_KEY = process.env.AI_API_KEY;
 const AI_PROVIDER = process.env.AI_PROVIDER || 'siliconflow';
@@ -84,36 +93,35 @@ function getChangedFiles() {
   const localStrategies = [
     {
       name: '工作区未提交变更',
-      command: 'git diff --name-only --diff-filter=ACM',
+      args: ['diff', '--name-only', '--diff-filter=ACM'],
     },
     {
       name: '暂存区变更',
-      command: 'git diff --cached --name-only --diff-filter=ACM',
+      args: ['diff', '--cached', '--name-only', '--diff-filter=ACM'],
     },
     {
       name: '未跟踪文件',
-      command: 'git ls-files --others --exclude-standard',
+      args: ['ls-files', '--others', '--exclude-standard'],
     },
   ];
   const githubStrategies = [
     {
       name: '增量审查',
-      command: `git diff --name-only --diff-filter=ACM ${baseRef}...HEAD`,
+      args: ['diff', '--name-only', '--diff-filter=ACM', `${baseRef}...HEAD`],
     },
     {
       name: '最近一次提交',
-      command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
+      args: ['diff', '--name-only', '--diff-filter=ACM', 'HEAD~1...HEAD'],
     },
   ];
   const strategies = GITHUB_EVENT_NAME ? githubStrategies : localStrategies;
 
   for (const strategy of strategies) {
     try {
-      const output = execSync(strategy.command, {
+      const output = execFileSync('git', strategy.args, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'ignore'],
       });
-      console.log(strategy.name, output);
       const changedFiles = output
         .split('\n')
         .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
@@ -139,15 +147,190 @@ function getChangedFiles() {
   console.log(
     '⚠️ AI_REVIEW_ALL_FILES=true，检查所有 JavaScript/TypeScript 文件',
   );
-  const output = execSync('git ls-files --cached --others --exclude-standard', {
-    encoding: 'utf-8',
-  });
-  const allFiles = output
-    .split('\n')
-    .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
+  try {
+    const output = execFileSync(
+      'git',
+      ['ls-files', '--cached', '--others', '--exclude-standard'],
+      {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    );
+    const allFiles = output
+      .split('\n')
+      .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
 
-  console.log(`📋 待审查文件数: ${allFiles.length}（全量审查）`);
-  return allFiles;
+    console.log(`📋 待审查文件数: ${allFiles.length}（全量审查）`);
+    return allFiles;
+  } catch (error) {
+    console.log(`⚠️ 全量文件枚举失败: ${error.message}`);
+    return [];
+  }
+}
+
+function sanitizeGitRef(ref) {
+  if (!ref || typeof ref !== 'string') return 'origin/main';
+  if (
+    ref.startsWith('-') ||
+    ref.includes('..') ||
+    ref.includes('~') ||
+    ref.includes('^')
+  ) {
+    return 'origin/main';
+  }
+  const sanitized = ref.replace(/[^a-zA-Z0-9_/.-]/g, '');
+  return sanitized || 'origin/main';
+}
+
+function getDiffWithContext(filePath, contextLines = 10) {
+  const baseRef = sanitizeGitRef(process.env.GITHUB_BASE_REF);
+  const strategies = GITHUB_EVENT_NAME
+    ? [
+        ['diff', `${baseRef}...HEAD`, '--', filePath],
+        ['diff', 'HEAD~1...HEAD', '--', filePath],
+      ]
+    : [
+        ['diff', '--', filePath],
+        ['diff', '--cached', '--', filePath],
+      ];
+
+  for (const args of strategies) {
+    try {
+      const output = execFileSync('git', args, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      if (output.trim()) {
+        return parseDiffWithContext(output, filePath, contextLines);
+      }
+    } catch {
+      console.log(`⚠️ git diff 失败`);
+    }
+  }
+
+  try {
+    const output = execFileSync('git', ['diff', 'HEAD', '--', filePath], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (output.trim()) {
+      return parseDiffWithContext(output, filePath, contextLines);
+    }
+  } catch {
+    console.log(`⚠️ git diff HEAD 失败`);
+  }
+
+  return null;
+}
+
+function parseDiffWithContext(diffOutput, filePath, contextLines) {
+  const normalizedContextLines = Math.max(
+    0,
+    Math.floor(Number(contextLines) || 0),
+  );
+  const lines = diffOutput.split('\n');
+  const result = [];
+  let currentSection = null;
+  let oldLineNumber = 0;
+  let newLineNumber = 0;
+  let contextBuffer = [];
+
+  for (const line of lines) {
+    const headerMatch = line.match(
+      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/,
+    );
+    if (headerMatch) {
+      if (currentSection) {
+        const tailContext =
+          normalizedContextLines === 0
+            ? []
+            : contextBuffer.slice(-normalizedContextLines);
+        currentSection.lines.push(...tailContext);
+        result.push(currentSection);
+      }
+      oldLineNumber = parseInt(headerMatch[1], 10);
+      newLineNumber = parseInt(headerMatch[3], 10);
+      currentSection = {
+        startLine: newLineNumber,
+        lines: [],
+      };
+      contextBuffer = [];
+      continue;
+    }
+
+    if (!currentSection) continue;
+
+    if (line.startsWith(' ')) {
+      contextBuffer.push({
+        type: 'context',
+        content: line.slice(1),
+        lineNumber: newLineNumber,
+      });
+      if (contextBuffer.length > normalizedContextLines) {
+        contextBuffer.shift();
+      }
+      oldLineNumber++;
+      newLineNumber++;
+    } else if (line.startsWith('+')) {
+      while (
+        contextBuffer.length > 0 &&
+        newLineNumber - contextBuffer[0].lineNumber >= normalizedContextLines
+      ) {
+        contextBuffer.shift();
+      }
+      currentSection.lines.push(...contextBuffer);
+      contextBuffer = [];
+      currentSection.lines.push({
+        type: 'added',
+        content: line.slice(1),
+        lineNumber: newLineNumber,
+      });
+      newLineNumber++;
+    } else if (line.startsWith('-')) {
+      while (
+        contextBuffer.length > 0 &&
+        newLineNumber - contextBuffer[0].lineNumber >= normalizedContextLines
+      ) {
+        contextBuffer.shift();
+      }
+      currentSection.lines.push(...contextBuffer);
+      contextBuffer = [];
+      currentSection.lines.push({
+        type: 'removed',
+        content: line.slice(1),
+        lineNumber: oldLineNumber,
+      });
+      oldLineNumber++;
+    } else if (line === '\\ No newline at end of file') {
+      continue;
+    }
+  }
+
+  if (currentSection) {
+    const tailContext =
+      normalizedContextLines === 0
+        ? []
+        : contextBuffer.slice(-normalizedContextLines);
+    currentSection.lines.push(...tailContext);
+    result.push(currentSection);
+  }
+
+  if (result.length === 0) return null;
+
+  const safeFilePath = filePath.replace(/[\r\n]/g, '');
+  let output = `--- ${safeFilePath} ---\n`;
+  for (const section of result) {
+    output += `\n[变更区域: 第 ${section.startLine} 行开始]\n`;
+    for (const line of section.lines) {
+      const prefix =
+        line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+      output += `${prefix}${line.lineNumber}: ${line.content}\n`;
+    }
+  }
+
+  return output;
 }
 
 function readFileContent(filePath) {
@@ -488,14 +671,18 @@ async function main() {
 
     const fileContents = batch
       .map((file) => {
-        const content = readFileContent(file);
-        return content ? `--- ${file} ---\n${content}\n` : null;
+        const diffContent = getDiffWithContext(file);
+        if (diffContent) {
+          return diffContent;
+        }
+        const fullContent = readFileContent(file);
+        return fullContent ? `--- ${file} ---\n${fullContent}\n` : null;
       })
       .filter(Boolean);
 
     if (fileContents.length === 0) continue;
 
-    const prompt = `请审查以下 React/前端代码文件：\n\n${fileContents.join('\n')}`;
+    const prompt = `请审查以下代码变更（+表示新增，-表示删除，空格表示上下文）：\n\n${fileContents.join('\n')}`;
 
     try {
       const result = await callAI(prompt);
