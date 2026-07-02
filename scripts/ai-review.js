@@ -16,12 +16,6 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_EVENT_NAME = process.env.GITHUB_EVENT_NAME;
 const GITHUB_EVENT_PATH = process.env.GITHUB_EVENT_PATH;
-const CI_PROJECT_PATH = process.env.CI_PROJECT_PATH;
-const CI_COMMIT_REF_NAME = process.env.CI_COMMIT_REF_NAME;
-const CI_PIPELINE_SOURCE = process.env.CI_PIPELINE_SOURCE;
-const CI_MERGE_REQUEST_TARGET_BRANCH_NAME =
-  process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
-const CI_SERVER_URL = process.env.CI_SERVER_URL || 'https://gitlab.com';
 
 const DEFAULT_OPENAI_MODEL = 'nex-agi/Nex-N2-Pro';
 const OPENAI_COMPATIBLE_API_URL =
@@ -88,10 +82,7 @@ async function fetchWithTimeout(url, options = {}) {
 }
 
 function getChangedFiles() {
-  const baseRef =
-    process.env.GITHUB_BASE_REF ||
-    process.env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME ||
-    'origin/main';
+  const baseRef = process.env.GITHUB_BASE_REF || 'origin/main';
   const localStrategies = [
     {
       name: '工作区未提交变更',
@@ -116,24 +107,7 @@ function getChangedFiles() {
       command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
     },
   ];
-  const gitlabStrategies = [
-    {
-      name: 'GitLab MR 增量审查',
-      command: `git diff --name-only --diff-filter=ACM ${baseRef}...HEAD`,
-    },
-    {
-      name: 'GitLab 分支提交',
-      command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
-    },
-  ];
-  let strategies;
-  if (GITHUB_EVENT_NAME) {
-    strategies = githubStrategies;
-  } else if (CI_PIPELINE_SOURCE) {
-    strategies = gitlabStrategies;
-  } else {
-    strategies = localStrategies;
-  }
+  const strategies = GITHUB_EVENT_NAME ? githubStrategies : localStrategies;
 
   for (const strategy of strategies) {
     try {
@@ -431,122 +405,6 @@ async function getPullRequestNumber() {
   return null;
 }
 
-function getMergeRequestIid() {
-  return process.env.CI_MERGE_REQUEST_IID;
-}
-
-async function getMergeRequestDiffRefs(mrIid) {
-  const gitlabToken = process.env.GITLAB_TOKEN;
-  const projectId = process.env.CI_PROJECT_ID;
-
-  if (!gitlabToken || !projectId) {
-    console.log('⚠️ GITLAB_TOKEN 或 CI_PROJECT_ID 未设置，跳过获取 diff_refs');
-    return null;
-  }
-
-  const url = `${CI_SERVER_URL}/api/v4/projects/${projectId}/merge_requests/${mrIid}`;
-
-  try {
-    const response = await fetchWithTimeout(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${gitlabToken}`,
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(
-        `获取 MR 信息失败: ${error.message || JSON.stringify(error)}`,
-      );
-    }
-
-    const data = await response.json();
-    if (data.diff_refs) {
-      console.log(`✅ 获取到 MR diff_refs: ${JSON.stringify(data.diff_refs)}`);
-      return data.diff_refs;
-    }
-
-    console.log('⚠️ MR 信息中未找到 diff_refs');
-    return null;
-  } catch (error) {
-    console.log(`⚠️ 获取 MR diff_refs 失败: ${error.message}`);
-    return null;
-  }
-}
-
-function generateInlineComment(issue) {
-  const label = SEVERITY_LABELS[issue.severity] || SEVERITY_LABELS.info;
-  return `${label.emoji} **[${label.label}]** ${issue.title}\n\n${issue.description}\n\n💡 ${issue.suggestion}`;
-}
-
-async function postGitLabInlineComment(mrIid, issue, diffRefs) {
-  const gitlabToken = process.env.GITLAB_TOKEN;
-  const projectId = process.env.CI_PROJECT_ID;
-
-  if (!gitlabToken || !projectId) {
-    console.log('⚠️ GITLAB_TOKEN 或 CI_PROJECT_ID 未设置，跳过行级评论');
-    return false;
-  }
-
-  if (!diffRefs) {
-    console.log('⚠️ 缺少 diff_refs，无法创建行级评论');
-    return false;
-  }
-
-  const url = `${CI_SERVER_URL}/api/v4/projects/${projectId}/merge_requests/${mrIid}/discussions`;
-  const comment = generateInlineComment(issue);
-
-  try {
-    const response = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${gitlabToken}`,
-      },
-      body: JSON.stringify({
-        body: comment,
-        position: {
-          base_sha: diffRefs.base_sha,
-          head_sha: diffRefs.head_sha,
-          start_sha: diffRefs.start_sha,
-          new_path: issue.file,
-          new_line: issue.line,
-          position_type: 'text',
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      const errorMsg = error.message || JSON.stringify(error);
-      if (
-        errorMsg.includes('position') ||
-        errorMsg.includes('new_line') ||
-        errorMsg.includes('diff')
-      ) {
-        console.log(
-          `⚠️ 行 ${issue.line} 不在 MR diff 范围内，跳过行级评论（汇总评论已包含此问题）`,
-        );
-      } else {
-        console.log(
-          `⚠️ 行级评论失败 [${issue.file}:${issue.line}]: ${errorMsg}`,
-        );
-      }
-      return false;
-    }
-
-    console.log(`✅ 已成功在 ${issue.file}:${issue.line} 发表行级评论`);
-    return true;
-  } catch (error) {
-    console.log(
-      `⚠️ 行级评论失败 [${issue.file}:${issue.line}]: ${error.message}`,
-    );
-    return false;
-  }
-}
-
 async function postGitHubComment(prNumber, comment) {
   if (!GITHUB_TOKEN || !GITHUB_REPOSITORY) {
     console.log('⚠️ GITHUB_TOKEN 或 GITHUB_REPOSITORY 未设置，跳过评论');
@@ -572,38 +430,6 @@ async function postGitHubComment(prNumber, comment) {
     }
 
     console.log(`✅ 已成功在 PR #${prNumber} 上发表评论`);
-  } catch (error) {
-    console.log(`⚠️ 发表评论失败: ${error.message}`);
-  }
-}
-
-async function postGitLabComment(mrIid, comment) {
-  const gitlabToken = process.env.GITLAB_TOKEN;
-  const projectId = process.env.CI_PROJECT_ID;
-
-  if (!gitlabToken || !projectId) {
-    console.log('⚠️ GITLAB_TOKEN 或 CI_PROJECT_ID 未设置，跳过评论');
-    return;
-  }
-
-  const url = `${CI_SERVER_URL}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`;
-
-  try {
-    const response = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${gitlabToken}`,
-      },
-      body: JSON.stringify({ body: comment }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`评论失败: ${error.message || JSON.stringify(error)}`);
-    }
-
-    console.log(`✅ 已成功在 MR #${mrIid} 上发表评论`);
   } catch (error) {
     console.log(`⚠️ 发表评论失败: ${error.message}`);
   }
@@ -688,22 +514,6 @@ async function main() {
     if (prNumber) {
       const comment = generateMarkdownComment(allIssues);
       await postGitHubComment(prNumber, comment);
-    }
-  }
-
-  if (CI_PIPELINE_SOURCE === 'merge_request_event') {
-    const mrIid = getMergeRequestIid();
-    if (mrIid) {
-      const comment = generateMarkdownComment(allIssues);
-      await postGitLabComment(mrIid, comment);
-
-      if (allIssues.length > 0) {
-        console.log('\n📝 正在创建行级评论...');
-        const diffRefs = await getMergeRequestDiffRefs(mrIid);
-        for (const issue of allIssues) {
-          await postGitLabInlineComment(mrIid, issue, diffRefs);
-        }
-      }
     }
   }
 

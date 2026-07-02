@@ -1,0 +1,91 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run lint
+        run: pnpm run lint
+
+      - name: Run AI review
+        run: pnpm run ai-review
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  deploy:
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            mkdir -p /var/www/changan-map-editor/logs
+            cd /var/www/changan-map-editor
+            rm -rf dist
+            cp -r /home/runner/work/changan-map-editor/changan-map-editor/dist .
+            cp package.json pnpm-lock.yaml pnpm-workspace.yaml ecosystem.config.js .
+
+            if [ -f doc/nginx.conf ]; then
+              NGINX_CONTAINER="${{ secrets.NGINX_CONTAINER || 'nginx-server' }}"
+              if ! docker inspect "$NGINX_CONTAINER" >/dev/null 2>&1; then
+                NGINX_CONTAINER="$(docker ps --format '{{.Names}} {{.Image}}' | awk 'tolower($0) ~ /nginx/ {print $1; exit}')"
+              fi
+              
+              if [ -z "$NGINX_CONTAINER" ]; then
+                echo "No nginx container found. Set the NGINX_CONTAINER secret." >&2
+                exit 1
+              fi
+              
+              docker cp doc/nginx.conf "$NGINX_CONTAINER:/etc/nginx/conf.d/changan-map-editor.conf"
+              docker exec "$NGINX_CONTAINER" nginx -t
+              docker exec "$NGINX_CONTAINER" nginx -s reload
+            fi
