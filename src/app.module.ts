@@ -5,17 +5,17 @@ import { LayerModule } from './layer/layer.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DatabaseInitService } from './common/database-init.service';
+import { RedisModule } from './common/redis.module';
 
 @Module({
   imports: [
-    // 加载环境变量
     ConfigModule.forRoot({
-      isGlobal: true,
+      // 加载环境变量
+      isGlobal: true, // 全局配置,代表这是一个全局配置模块,可以在任何地方使用
       envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
     }),
-    // 配置数据库连接
     TypeOrmModule.forRootAsync({
-      //使用工厂函数配置数据库连接参数，根据环境变量动态配置
+      // 异步加载数据库配置，用forRootAsync方法是因为TypeOrmModule.forRoot方法是同步的，而数据库配置是异步的，需要确保在数据库配置完成后加载数据库模块
       useFactory: (configService: ConfigService) => ({
         type: 'mysql',
         host: configService.get('DB_HOST', 'localhost'),
@@ -23,12 +23,12 @@ import { DatabaseInitService } from './common/database-init.service';
         username: configService.get('DB_USERNAME', 'root'),
         password: configService.get('DB_PASSWORD', 'Root@123456'),
         database: configService.get('DB_DATABASE', 'layer'),
-        entities: ['dist/**/*.entity{.ts,.js}', 'dist/**/*Entity{.ts,.js}'],
-        autoLoadEntities: true, // 自动加载实体类
-        synchronize: configService.get('DB_SYNC', 'true') === 'true', // 开发环境建议开启，生产环境建议关闭,自动同步数据库表结构
+        autoLoadEntities: true, // 自动加载TypeOrmModule.forFeature方法中指定的实体类
+        synchronize: configService.get('DB_SYNC', 'true') === 'true',
       }),
       inject: [ConfigService],
     }),
+    RedisModule,
     LayerModule,
   ],
   controllers: [AppController],

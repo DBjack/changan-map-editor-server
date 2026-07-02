@@ -9,7 +9,6 @@ import {
 
 import { Request, Response } from 'express';
 import { Logger } from '@nestjs/common';
-console.log(11);
 const getMessage = (value: unknown, fallback: string): string => {
   if (Array.isArray(value)) {
     return value.map((item) => getMessage(item, fallback)).join('; ');

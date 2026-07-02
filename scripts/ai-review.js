@@ -1,27 +1,53 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
-const path = require('path');
 
-require('dotenv').config();
+try {
+  require('dotenv').config();
+  const env = process.env.NODE_ENV || 'development';
+  const envFile = `.env.${env}`;
+  if (fs.existsSync(envFile)) {
+    require('dotenv').config({ path: envFile, override: true });
+  }
+} catch {}
+
+function sanitizeEnvName(name) {
+  if (!name || typeof name !== 'string') return 'development';
+  const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '');
+  return sanitized || 'development';
+}
 
 const AI_API_KEY = process.env.AI_API_KEY;
-const AI_PROVIDER = process.env.AI_PROVIDER || 'gemini';
-const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
+const AI_PROVIDER = process.env.AI_PROVIDER || 'siliconflow';
 const REVIEW_SEVERITY = process.env.REVIEW_SEVERITY || 'warning';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 const GITHUB_EVENT_NAME = process.env.GITHUB_EVENT_NAME;
 const GITHUB_EVENT_PATH = process.env.GITHUB_EVENT_PATH;
 
-const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'nex-agi/Nex-N2-Pro';
 const OPENAI_COMPATIBLE_API_URL =
   process.env.AI_API_URL ||
   process.env.OPENAI_API_URL ||
-  'https://api.openai.com/v1/chat/completions';
-const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+  'https://api.siliconflow.cn/v1/chat/completions';
+const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 const AI_REQUEST_TIMEOUT_MS = getRequestTimeoutMs();
 const AI_REVIEW_ALL_FILES = process.env.AI_REVIEW_ALL_FILES === 'true';
+
+function maskSecret(secret) {
+  if (!secret) return '未设置';
+  if (secret.length <= 8) return '****';
+  return secret.slice(0, 4) + '****' + secret.slice(-4);
+}
+
+function validateApiKey(key) {
+  if (!key) {
+    return { valid: false, message: 'API Key 未设置' };
+  }
+  if (!/^[A-Za-z0-9_-]{10,}$/.test(key)) {
+    return { valid: false, message: 'API Key 格式不正确' };
+  }
+  return { valid: true, message: '' };
+}
 
 const SEVERITY_LEVELS = {
   none: 0,
@@ -67,38 +93,38 @@ function getChangedFiles() {
   const localStrategies = [
     {
       name: '工作区未提交变更',
-      command: 'git diff --name-only --diff-filter=ACM',
+      args: ['diff', '--name-only', '--diff-filter=ACM'],
     },
     {
       name: '暂存区变更',
-      command: 'git diff --cached --name-only --diff-filter=ACM',
+      args: ['diff', '--cached', '--name-only', '--diff-filter=ACM'],
     },
     {
       name: '未跟踪文件',
-      command: 'git ls-files --others --exclude-standard',
+      args: ['ls-files', '--others', '--exclude-standard'],
     },
   ];
   const githubStrategies = [
     {
       name: '增量审查',
-      command: `git diff --name-only --diff-filter=ACM ${baseRef}...HEAD`,
+      args: ['diff', '--name-only', '--diff-filter=ACM', `${baseRef}...HEAD`],
     },
     {
       name: '最近一次提交',
-      command: 'git diff --name-only --diff-filter=ACM HEAD~1...HEAD',
+      args: ['diff', '--name-only', '--diff-filter=ACM', 'HEAD~1...HEAD'],
     },
   ];
   const strategies = GITHUB_EVENT_NAME ? githubStrategies : localStrategies;
 
   for (const strategy of strategies) {
     try {
-      const output = execSync(strategy.command, {
+      const output = execFileSync('git', strategy.args, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'ignore'],
       });
       const changedFiles = output
         .split('\n')
-        .filter((file) => file.trim() && file.endsWith('.ts'));
+        .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
 
       if (changedFiles.length > 0) {
         console.log(
@@ -113,21 +139,198 @@ function getChangedFiles() {
 
   if (!AI_REVIEW_ALL_FILES) {
     console.log(
-      '✅ 未找到需要审查的 TypeScript 变更文件（如需全量审查，设置 AI_REVIEW_ALL_FILES=true）',
+      '✅ 未找到需要审查的 JavaScript/TypeScript 变更文件（如需全量审查，设置 AI_REVIEW_ALL_FILES=true）',
     );
     return [];
   }
 
-  console.log('⚠️ AI_REVIEW_ALL_FILES=true，检查所有 TypeScript 文件');
-  const output = execSync('git ls-files --cached --others --exclude-standard', {
-    encoding: 'utf-8',
-  });
-  const allFiles = output
-    .split('\n')
-    .filter((file) => file.trim() && file.endsWith('.ts'));
+  console.log(
+    '⚠️ AI_REVIEW_ALL_FILES=true，检查所有 JavaScript/TypeScript 文件',
+  );
+  try {
+    const output = execFileSync(
+      'git',
+      ['ls-files', '--cached', '--others', '--exclude-standard'],
+      {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    );
+    const allFiles = output
+      .split('\n')
+      .filter((file) => file.trim() && /\.(js|jsx|ts|tsx)$/.test(file));
 
-  console.log(`📋 待审查文件数: ${allFiles.length}（全量审查）`);
-  return allFiles;
+    console.log(`📋 待审查文件数: ${allFiles.length}（全量审查）`);
+    return allFiles;
+  } catch (error) {
+    console.log(`⚠️ 全量文件枚举失败: ${error.message}`);
+    return [];
+  }
+}
+
+function sanitizeGitRef(ref) {
+  if (!ref || typeof ref !== 'string') return 'origin/main';
+  if (
+    ref.startsWith('-') ||
+    ref.includes('..') ||
+    ref.includes('~') ||
+    ref.includes('^')
+  ) {
+    return 'origin/main';
+  }
+  const sanitized = ref.replace(/[^a-zA-Z0-9_/.-]/g, '');
+  return sanitized || 'origin/main';
+}
+
+function getDiffWithContext(filePath, contextLines = 10) {
+  const baseRef = sanitizeGitRef(process.env.GITHUB_BASE_REF);
+  const strategies = GITHUB_EVENT_NAME
+    ? [
+        ['diff', `${baseRef}...HEAD`, '--', filePath],
+        ['diff', 'HEAD~1...HEAD', '--', filePath],
+      ]
+    : [
+        ['diff', '--', filePath],
+        ['diff', '--cached', '--', filePath],
+      ];
+
+  for (const args of strategies) {
+    try {
+      const output = execFileSync('git', args, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      if (output.trim()) {
+        return parseDiffWithContext(output, filePath, contextLines);
+      }
+    } catch {
+      console.log(`⚠️ git diff 失败`);
+    }
+  }
+
+  try {
+    const output = execFileSync('git', ['diff', 'HEAD', '--', filePath], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (output.trim()) {
+      return parseDiffWithContext(output, filePath, contextLines);
+    }
+  } catch {
+    console.log(`⚠️ git diff HEAD 失败`);
+  }
+
+  return null;
+}
+
+function parseDiffWithContext(diffOutput, filePath, contextLines) {
+  const normalizedContextLines = Math.max(
+    0,
+    Math.floor(Number(contextLines) || 0),
+  );
+  const lines = diffOutput.split('\n');
+  const result = [];
+  let currentSection = null;
+  let oldLineNumber = 0;
+  let newLineNumber = 0;
+  let contextBuffer = [];
+
+  for (const line of lines) {
+    const headerMatch = line.match(
+      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/,
+    );
+    if (headerMatch) {
+      if (currentSection) {
+        const tailContext =
+          normalizedContextLines === 0
+            ? []
+            : contextBuffer.slice(-normalizedContextLines);
+        currentSection.lines.push(...tailContext);
+        result.push(currentSection);
+      }
+      oldLineNumber = parseInt(headerMatch[1], 10);
+      newLineNumber = parseInt(headerMatch[3], 10);
+      currentSection = {
+        startLine: newLineNumber,
+        lines: [],
+      };
+      contextBuffer = [];
+      continue;
+    }
+
+    if (!currentSection) continue;
+
+    if (line.startsWith(' ')) {
+      contextBuffer.push({
+        type: 'context',
+        content: line.slice(1),
+        lineNumber: newLineNumber,
+      });
+      if (contextBuffer.length > normalizedContextLines) {
+        contextBuffer.shift();
+      }
+      oldLineNumber++;
+      newLineNumber++;
+    } else if (line.startsWith('+')) {
+      while (
+        contextBuffer.length > 0 &&
+        newLineNumber - contextBuffer[0].lineNumber >= normalizedContextLines
+      ) {
+        contextBuffer.shift();
+      }
+      currentSection.lines.push(...contextBuffer);
+      contextBuffer = [];
+      currentSection.lines.push({
+        type: 'added',
+        content: line.slice(1),
+        lineNumber: newLineNumber,
+      });
+      newLineNumber++;
+    } else if (line.startsWith('-')) {
+      while (
+        contextBuffer.length > 0 &&
+        newLineNumber - contextBuffer[0].lineNumber >= normalizedContextLines
+      ) {
+        contextBuffer.shift();
+      }
+      currentSection.lines.push(...contextBuffer);
+      contextBuffer = [];
+      currentSection.lines.push({
+        type: 'removed',
+        content: line.slice(1),
+        lineNumber: oldLineNumber,
+      });
+      oldLineNumber++;
+    } else if (line === '\\ No newline at end of file') {
+      continue;
+    }
+  }
+
+  if (currentSection) {
+    const tailContext =
+      normalizedContextLines === 0
+        ? []
+        : contextBuffer.slice(-normalizedContextLines);
+    currentSection.lines.push(...tailContext);
+    result.push(currentSection);
+  }
+
+  if (result.length === 0) return null;
+
+  const safeFilePath = filePath.replace(/[\r\n]/g, '');
+  let output = `--- ${safeFilePath} ---\n`;
+  for (const section of result) {
+    output += `\n[变更区域: 第 ${section.startLine} 行开始]\n`;
+    for (const line of section.lines) {
+      const prefix =
+        line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
+      output += `${prefix}${line.lineNumber}: ${line.content}\n`;
+    }
+  }
+
+  return output;
 }
 
 function readFileContent(filePath) {
@@ -140,99 +343,47 @@ function readFileContent(filePath) {
 
 async function callAI(prompt) {
   try {
-    const systemPrompt = `你是一位资深的 NestJS 后端代码审查专家。请审查以下代码，关注以下方面：
-1. 安全性：SQL 注入、XSS、认证绕过等安全漏洞
+    const systemPrompt = `你是一位资深的 NestJS/Node.js 后端代码审查专家。请审查以下代码，关注以下方面：
+1. 安全性：SQL注入、XSS、敏感信息泄露、认证绕过等安全漏洞
 2. 代码质量：代码结构、命名规范、可读性、重复代码
 3. 最佳实践：是否符合 NestJS 最佳实践、TypeScript 规范
-4. 性能：潜在的性能问题、N+1 查询等
-5. 错误处理：异常处理是否完善
-6. 类型安全：TypeScript 类型定义是否正确
+4. 性能：潜在的性能问题、N+1 查询、内存泄漏等
+5. 错误处理：异常处理是否完善、边界情况处理
+6. 类型安全：TypeScript 类型定义是否正确、是否存在 any 滥用
 
-请以 JSON 格式输出审查结果，格式如下：
-{
-  "issues": [
-    {
-      "file": "文件名",
-      "line": 行号,
-      "severity": "info" | "warning" | "error",
-      "title": "问题标题",
-      "description": "问题详细描述",
-      "suggestion": "修复建议"
-    }
-  ]
-}
+## 输出要求
+- 必须返回合法的 JSON 格式，不要包含 Markdown 代码块标记（如 \`\`\`json）
+- 不要包含任何解释性文字或额外说明
+- 如果没有发现问题，返回 {"issues":[]}
+- issues 数组中的每个对象必须包含：file（文件名）、line（行号）、severity（info|warning|error）、title（问题标题）、description（问题详细描述）、suggestion（修复建议）
 
-只输出 JSON，不要包含其他文本。`;
-
-    if (AI_PROVIDER === 'gemini') {
-      const model = process.env.AI_MODEL || DEFAULT_GEMINI_MODEL;
-      const url = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${model}:generateContent`;
-      const response = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': AI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: systemPrompt }],
-            },
-            {
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        let errorMessage = `Gemini API 调用失败: ${response.status} ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.error) {
-            errorMessage += ` - ${errorData.error.message || JSON.stringify(errorData.error)}`;
-          }
-        } catch {
-          const text = await response.text();
-          if (text) {
-            errorMessage += ` - ${text.substring(0, 200)}`;
-          }
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      if (
-        !data.candidates ||
-        !data.candidates[0] ||
-        !data.candidates[0].content ||
-        !data.candidates[0].content.parts
-      ) {
-        throw new Error('Gemini API 返回格式不正确');
-      }
-      return data.candidates[0].content.parts.map((p) => p.text).join('');
-    }
-
+## 示例输出
+{"issues":[{"file":"src/app.module.ts","line":26,"severity":"warning","title":"冗余配置","description":"entities 配置与 autoLoadEntities 功能重复","suggestion":"删除 entities 配置，仅保留 autoLoadEntities: true"}]}`;
     const url = OPENAI_COMPATIBLE_API_URL;
-    const response = await fetchWithTimeout(url, {
+    const body = JSON.stringify({
+      model: process.env.AI_MODEL || DEFAULT_OPENAI_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.1,
+    });
+    console.log(`📤 请求 URL: ${url}`);
+    console.log(`📤 请求体大小: ${body.length} 字符`);
+    console.log(`📤 超时时间: ${AI_REQUEST_TIMEOUT_MS}ms`);
+    console.log(`📤 开始请求...`);
+    const start = Date.now();
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${AI_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: process.env.AI_MODEL || DEFAULT_OPENAI_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-      }),
+      body: body,
     });
-
+    const duration = Date.now() - start;
+    console.log(`📤 响应时间: ${duration}ms`);
+    console.log(`📤 状态码: ${response.status}`);
     if (!response.ok) {
       let errorMessage = `API 调用失败: ${response.status} ${response.statusText}`;
       try {
@@ -253,7 +404,16 @@ async function callAI(prompt) {
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
       throw new Error('API 返回格式不正确');
     }
-    return data.choices[0].message.content;
+    const message = data.choices[0].message;
+    // 优先使用 content，如果为空则尝试使用 reasoning_content
+    let content = message.content;
+    if (!content || content.trim() === '') {
+      content = message.reasoning_content || '';
+    }
+    if (!content || content.trim() === '') {
+      throw new Error('AI 返回内容为空');
+    }
+    return content;
   } catch (error) {
     if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
       const url =
@@ -267,15 +427,48 @@ async function callAI(prompt) {
 }
 
 function parseReviewResult(content) {
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  let cleanedContent = content.trim();
+
+  console.log(
+    `📤 AI 返回内容 (前500字符): ${cleanedContent.substring(0, 500)}`,
+  );
+
+  cleanedContent = cleanedContent.replace(/^```json\s*/i, '');
+  cleanedContent = cleanedContent.replace(/\s*```$/i, '');
+  cleanedContent = cleanedContent.replace(/^```\s*/, '');
+  cleanedContent = cleanedContent.replace(/\s*```$/, '');
+
+  const jsonMatch = cleanedContent.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    throw new Error('AI 返回内容中未找到 JSON');
+    const arrayMatch = cleanedContent.match(/\[.*?\]/);
+    if (arrayMatch && /^\[(\s*\d+\s*,?\s*)*\]$/.test(arrayMatch[0])) {
+      console.log('⚠️ AI 返回了数字数组，可能是模型问题，尝试请求重试');
+      throw new Error(
+        `AI 返回了无效格式（数字数组），原始响应前200字符: ${content.substring(0, 200)}`,
+      );
+    }
+    throw new Error(
+      `AI 返回内容中未找到 JSON，原始响应前500字符: ${content.substring(0, 500)}`,
+    );
   }
 
+  let jsonString = jsonMatch[0];
+
   try {
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    throw new Error('AI 返回内容不是有效 JSON');
+    return JSON.parse(jsonString);
+  } catch (parseError) {
+    jsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
+    jsonString = jsonString.replace(/([^\\])'/g, '$1"');
+
+    try {
+      return JSON.parse(jsonString);
+    } catch (secondParseError) {
+      throw new Error(
+        `AI 返回内容不是有效 JSON，错误: ${parseError.message}，第二次解析错误: ${
+          secondParseError.message
+        }，原始响应前500字符: ${content.substring(0, 500)}`,
+      );
+    }
   }
 }
 
@@ -336,7 +529,9 @@ function printIssues(issues) {
 
   if (hasCriticalIssue) {
     console.log(
-      `\n❌ 发现 ${issues.filter((i) => SEVERITY_LEVELS[i.severity] >= minSeverity).length} 个严重问题`,
+      `\n❌ 发现 ${
+        issues.filter((i) => SEVERITY_LEVELS[i.severity] >= minSeverity).length
+      } 个严重问题`,
     );
   }
 
@@ -395,23 +590,23 @@ function generateMarkdownComment(issues) {
 }
 
 async function getPullRequestNumber() {
-  if (GITHUB_EVENT_NAME !== 'pull_request') {
-    return null;
-  }
+  if (GITHUB_EVENT_NAME === 'pull_request') {
+    try {
+      if (GITHUB_EVENT_PATH && fs.existsSync(GITHUB_EVENT_PATH)) {
+        const eventData = JSON.parse(
+          fs.readFileSync(GITHUB_EVENT_PATH, 'utf-8'),
+        );
+        return eventData.pull_request?.number;
+      }
 
-  try {
-    if (GITHUB_EVENT_PATH && fs.existsSync(GITHUB_EVENT_PATH)) {
-      const eventData = JSON.parse(fs.readFileSync(GITHUB_EVENT_PATH, 'utf-8'));
-      return eventData.pull_request?.number;
+      const output = execSync('git log --oneline -1', { encoding: 'utf-8' });
+      const prMatch = output.match(/#(\d+)/);
+      if (prMatch) {
+        return parseInt(prMatch[1], 10);
+      }
+    } catch {
+      console.log('⚠️ 无法获取 PR 编号');
     }
-
-    const output = execSync('git log --oneline -1', { encoding: 'utf-8' });
-    const prMatch = output.match(/#(\d+)/);
-    if (prMatch) {
-      return parseInt(prMatch[1], 10);
-    }
-  } catch {
-    console.log('⚠️ 无法获取 PR 编号');
   }
 
   return null;
@@ -448,9 +643,11 @@ async function postGitHubComment(prNumber, comment) {
 }
 
 async function main() {
-  if (!AI_API_KEY) {
-    console.log('⚠️ AI_API_KEY 未设置，跳过 AI 审查');
-    process.exit(0);
+  const keyValidation = validateApiKey(AI_API_KEY);
+  if (!keyValidation.valid) {
+    console.log(`⚠️ ${keyValidation.message}，跳过 AI 审查`);
+    console.log(`   当前 API Key: ${maskSecret(AI_API_KEY)}`);
+    return;
   }
 
   console.log(`🚀 开始 AI 代码审查... (Provider: ${AI_PROVIDER})`);
@@ -462,7 +659,7 @@ async function main() {
     process.exit(0);
   }
 
-  const batchSize = 3;
+  const batchSize = 1;
   let allIssues = [];
   let reviewFailures = 0;
 
@@ -474,17 +671,22 @@ async function main() {
 
     const fileContents = batch
       .map((file) => {
-        const content = readFileContent(file);
-        return content ? `--- ${file} ---\n${content}\n` : null;
+        const diffContent = getDiffWithContext(file);
+        if (diffContent) {
+          return diffContent;
+        }
+        const fullContent = readFileContent(file);
+        return fullContent ? `--- ${file} ---\n${fullContent}\n` : null;
       })
       .filter(Boolean);
 
     if (fileContents.length === 0) continue;
 
-    const prompt = `请审查以下 NestJS 代码文件：\n\n${fileContents.join('\n')}`;
+    const prompt = `请审查以下代码变更（+表示新增，-表示删除，空格表示上下文）：\n\n${fileContents.join('\n')}`;
 
     try {
       const result = await callAI(prompt);
+      console.log(result, 'AI直出的内容');
       const parsed = parseReviewResult(result);
       if (!Array.isArray(parsed.issues)) {
         throw new Error('AI 返回 JSON 缺少 issues 数组');
@@ -512,8 +714,9 @@ async function main() {
     console.log(
       `\n❌ 有 ${reviewFailures} 个批次审查失败，请先修复 AI 调用或返回格式问题`,
     );
+    console.log(`   当前 API Key: ${maskSecret(AI_API_KEY)}`);
     console.log(
-      '   可检查 AI_API_KEY、AI_MODEL、网络代理，或临时设置 AI_REQUEST_TIMEOUT_MS 调整等待时间',
+      '   可检查 API Key、模型配置、网络代理，或临时设置 AI_REQUEST_TIMEOUT_MS 调整等待时间',
     );
   }
 
@@ -525,6 +728,9 @@ async function main() {
     }
   }
 
+  if (hasCriticalIssue || reviewFailures > 0) {
+    process.exit(1);
+  }
   process.exit(0);
 }
 

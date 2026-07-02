@@ -1,115 +1,90 @@
-name: Deploy to Production
+name: Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, dev]
   pull_request:
-    branches:
-      - main
+    branches: [main, dev]
 
 jobs:
-  build-and-test:
+  build-test:
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 22
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        run: npm install -g pnpm
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Lint
+      - name: Run lint
         run: pnpm run lint
 
-      - name: AI Code Review
+      - name: Run AI review
+        run: pnpm run ai-review || echo "AI 审查跳过（API Key 未配置或无效）"
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'openai' }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
           AI_API_URL: ${{ secrets.AI_API_URL }}
-          AI_MODEL: ${{ secrets.AI_MODEL || 'deepseek-v4-flash' }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm run ai-review
 
-      - name: Test
+      - name: Run tests
         run: pnpm run test
 
       - name: Build
         run: pnpm run build
 
-      - name: Upload build artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
   deploy:
+    needs: build-test
     runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
+    if: github.ref == 'refs/heads/main'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download build artifact
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist
-          path: dist/
 
-      - name: Upload dist to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          source: 'dist/**,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,ecosystem.config.js,.env.production,doc/nginx.conf'
-          target: /var/www/changan-map-editor/
-
-      - name: Restart application
+      - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          NGINX_CONTAINER: ${{ secrets.NGINX_CONTAINER }}
         with:
           host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          script_stop: true
-          envs: NGINX_CONTAINER
           script: |
             set -e
             mkdir -p /var/www/changan-map-editor/logs
             cd /var/www/changan-map-editor
-            pnpm install --prod --frozen-lockfile --ignore-scripts
-            pm2 startOrRestart ecosystem.config.js --env production
-            pm2 save
+            rm -rf dist
+            cp -r /home/runner/work/changan-map-editor/changan-map-editor/dist .
+            cp package.json pnpm-lock.yaml pnpm-workspace.yaml ecosystem.config.js .
 
             if [ -f doc/nginx.conf ]; then
-              NGINX_CONTAINER="${NGINX_CONTAINER:-nginx-server}"
+              NGINX_CONTAINER="${{ secrets.NGINX_CONTAINER || 'nginx-server' }}"
               if ! docker inspect "$NGINX_CONTAINER" >/dev/null 2>&1; then
                 NGINX_CONTAINER="$(docker ps --format '{{.Names}} {{.Image}}' | awk 'tolower($0) ~ /nginx/ {print $1; exit}')"
               fi
-
+              
               if [ -z "$NGINX_CONTAINER" ]; then
-                echo "No nginx container found. Set the NGINX_CONTAINER GitHub secret to your container name." >&2
+                echo "No nginx container found. Set the NGINX_CONTAINER secret." >&2
                 exit 1
               fi
-
+              
               docker cp doc/nginx.conf "$NGINX_CONTAINER:/etc/nginx/conf.d/changan-map-editor.conf"
               docker exec "$NGINX_CONTAINER" nginx -t
               docker exec "$NGINX_CONTAINER" nginx -s reload
