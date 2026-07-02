@@ -6,9 +6,7 @@ try {
   require('dotenv').config();
 } catch {}
 
-const AI_API_KEY =
-  process.env.AI_API_KEY ||
-  'sk-afisciaiawtoiphupttwpcbolcnktpveeozyyktjcmyvlodh';
+const AI_API_KEY = process.env.AI_API_KEY;
 const AI_PROVIDER = process.env.AI_PROVIDER || 'siliconflow';
 const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
 const REVIEW_SEVERITY = process.env.REVIEW_SEVERITY || 'warning';
@@ -440,7 +438,7 @@ async function main() {
   if (!keyValidation.valid) {
     console.log(`⚠️ ${keyValidation.message}，跳过 AI 审查`);
     console.log(`   当前 API Key: ${maskSecret(AI_API_KEY)}`);
-    process.exit(0);
+    return;
   }
 
   console.log(`🚀 开始 AI 代码审查... (Provider: ${AI_PROVIDER})`);

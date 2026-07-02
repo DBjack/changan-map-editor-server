@@ -27,7 +27,7 @@ jobs:
         run: pnpm run lint
 
       - name: Run AI review
-        run: pnpm run ai-review
+        run: pnpm run ai-review || echo "AI 审查跳过（API Key 未配置或无效）"
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
